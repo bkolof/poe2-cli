@@ -46,6 +46,17 @@ The `poe2` skill teaches Claude Code to use the CLI. Install it as a plugin:
 Then ask Claude about your character, for example "what should I upgrade on
 `Name#1234/MyCharacter` for 2 divines?".
 
+### Codex
+
+The same skill works in Codex (CLI, IDE and desktop app). Ask Codex:
+
+```
+$skill-installer install https://github.com/bkolof/poe2-cli/tree/main/skills/poe2
+```
+
+Or copy `skills/poe2` from this repo into `~/.agents/skills/poe2`. Codex picks
+up new skills automatically; restart it if the skill does not show up.
+
 ### Trade site login
 
 Weighted trade searches need your pathofexile.com session: run
