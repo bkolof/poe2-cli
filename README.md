@@ -70,6 +70,20 @@ mkdir -p ~/.agents/skills/poe2 && curl -LsSf https://raw.githubusercontent.com/b
 Codex picks up new skills automatically; restart it if the skill does not show
 up.
 
+On Windows, Codex's sandbox only runs programs from system folders, so it
+cannot start `poe2` from the user profile ("Access denied", or "not
+installed"), and `poe2` also needs network access. A Codex rule lets it run
+outside the sandbox; in PowerShell:
+
+```powershell
+New-Item -ItemType Directory -Force "$HOME\.codex\rules" | Out-Null; Add-Content "$HOME\.codex\rules\default.rules" 'prefix_rule(pattern=["poe2"], decision="allow")'
+```
+
+Then quit Codex completely (also from the system tray) and start it again,
+which also picks up the PATH change from installing `poe2`. Without the rule,
+approve running `poe2` outside the sandbox when Codex asks, or give the chat
+full access.
+
 ### Trade site login
 
 Weighted trade searches need your pathofexile.com session: run

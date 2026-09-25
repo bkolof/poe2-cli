@@ -27,6 +27,13 @@ On Windows, in PowerShell:
 `powershell -ExecutionPolicy Bypass -c "irm https://github.com/bkolof/poe2-cli/releases/latest/download/poe2-installer.ps1 | iex"`.
 A new terminal picks up the PATH change.
 
+If `poe2` is installed but fails with "Access denied" or "not found" inside a
+sandbox (Codex on Windows runs only programs from system folders, and `poe2`
+needs network access), run it outside the sandbox, asking the user to approve
+that. For Codex, a rule in `~/.codex/rules/default.rules` allows it for good:
+`prefix_rule(pattern=["poe2"], decision="allow")`, followed by a full restart of
+Codex.
+
 ## Naming a build
 
 Every build command takes a BUILD, which can be:
