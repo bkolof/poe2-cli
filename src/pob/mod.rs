@@ -18,7 +18,8 @@ pub use code::{decode_build_code, encode_build_code};
 pub use install::{VERSION, ensure_installed, installed_dir};
 use model::{
     BuildInfo, GemInfo, Listing, ModInfo, SidebarRow, SkillDps, SlotUniques, SlotUpgrades,
-    TradeQuery, TradeQueryRequest, TradeStat, TreeSuggestion, UniqueInfo, WhatIf, WhatIfRequest,
+    TradeQuery, TradeQueryRequest, TradeStat, TreeSuggestion, UniqueBase, UniqueInfo, WhatIf,
+    WhatIfRequest,
 };
 
 unsafe extern "C-unwind" {
@@ -103,6 +104,17 @@ impl Pob {
     pub fn trade_query(&self, request: &TradeQueryRequest) -> Result<TradeQuery> {
         let request = self.lua.to_value(request)?;
         self.call("tradeQuery", request)
+    }
+
+    /// The slot a trade search calculates in, by its PoB name. `jewel` picks
+    /// an empty allocated jewel socket.
+    pub fn trade_slot(&self, slot: &str) -> Result<String> {
+        self.call("tradeSlot", slot)
+    }
+
+    /// A unique by its exact name, with its base.
+    pub fn find_unique(&self, name: &str) -> Result<UniqueBase> {
+        self.call("findUnique", name)
     }
 
     /// Trade site stats matching a text or id, best match first.

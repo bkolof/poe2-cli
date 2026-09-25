@@ -154,6 +154,7 @@ fn analyses_a_build() {
             by: "balanced".into(),
             status: "securable".into(),
             max_exalted: 1000.0,
+            jewel_type: "Base".into(),
         })
         .unwrap();
     assert_eq!(query.slot, "Boots");

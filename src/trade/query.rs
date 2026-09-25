@@ -304,10 +304,9 @@ impl FromStr for Filter {
 
 /// `--sort`: which listings the trade site returns first, and so which get
 /// fetched and calculated.
-#[derive(Debug, Clone, Default, PartialEq)]
+#[derive(Debug, Clone, PartialEq)]
 pub enum Sort {
     /// PoB's weighted sum, highest first.
-    #[default]
     Pob,
     /// Cheapest first.
     Price,
@@ -345,7 +344,7 @@ impl FromStr for Sort {
     }
 }
 
-/// Everything the user adds to PoB's search.
+/// Everything the user adds to a search.
 #[derive(Debug, Clone, Default)]
 pub struct Additions {
     pub require: Vec<Require>,
@@ -353,7 +352,8 @@ pub struct Additions {
     pub count: Vec<Count>,
     pub sum: Vec<Sum>,
     pub filter: Vec<Filter>,
-    pub sort: Sort,
+    /// Default: PoB's weighted sum, or the price without it.
+    pub sort: Option<Sort>,
     /// Replaces PoB's minimum for its weighted sum.
     pub min_weight: Option<f64>,
     /// Raw query JSON merged in last.
@@ -397,16 +397,18 @@ pub struct Search {
 }
 
 impl Additions {
-    /// Write the additions into PoB's query. `resolve` finds a trade stat by
+    /// Write the additions into a query: PoB's weighted one, whose weights
+    /// are given, or one from `item_query`. `resolve` finds a trade stat by
     /// text.
     pub fn apply(
         &self,
-        pob_query: &str,
+        base_query: &str,
         weights: Vec<TradeWeight>,
         resolve: impl Fn(&str) -> Result<TradeStat>,
     ) -> Result<Search> {
+        let weighted = !weights.is_empty();
         let mut query: Value =
-            serde_json::from_str(pob_query).context("PoB generated an invalid query")?;
+            serde_json::from_str(base_query).context("PoB generated an invalid query")?;
         let groups = self.groups(&weights, &resolve)?;
         let stats = query["query"]["stats"]
             .as_array_mut()
@@ -415,10 +417,18 @@ impl Additions {
         stats.retain(|g| g["filters"].as_array().is_some_and(|f| !f.is_empty()));
 
         if let Some(min) = self.min_weight {
+            if !weighted {
+                bail!(
+                    "--min-weight applies to PoB's weighted sum, which a search by name or base has not"
+                );
+            }
+
             stats[0]["value"] = json!({ "min": min });
         }
 
-        let min_weight = stats[0]["value"]["min"].as_f64();
+        let min_weight = weighted
+            .then(|| stats[0]["value"]["min"].as_f64())
+            .flatten();
 
         for group in &groups {
             stats.push(group_json(group));
@@ -437,16 +447,23 @@ impl Additions {
             }
         }
 
-        query["sort"] = match &self.sort {
+        let sort = self
+            .sort
+            .clone()
+            .unwrap_or(if weighted { Sort::Pob } else { Sort::Price });
+        query["sort"] = match &sort {
+            Sort::Pob if !weighted => {
+                bail!("a search by name or base has no PoB weights to sort by")
+            }
             Sort::Pob => json!({ "statgroup.0": "desc" }),
             Sort::Price => json!({ "price": "asc" }),
-            // The site numbers only the weighted sums; PoB's is the first.
+            // The site numbers only the weighted sums; PoB's comes first.
             Sort::Sum(n) => {
                 if *n > self.sum.len() {
                     bail!("there is no --sum number {n}");
                 }
 
-                json!({ format!("statgroup.{n}"): "desc" })
+                json!({ format!("statgroup.{}", n - 1 + usize::from(weighted)): "desc" })
             }
             Sort::Stat(text) => json!({ format!("stat.{}", resolve(text)?.id): "desc" }),
         };
@@ -462,7 +479,7 @@ impl Additions {
             min_weight,
             groups,
             filters: self.filter.iter().map(|f| f.text.clone()).collect(),
-            sort: sort_name(&self.sort),
+            sort: sort_name(&sort),
         })
     }
 
@@ -538,7 +555,7 @@ impl Additions {
 
         // The site sorts only by stats the query has; an `if` group adds one
         // without filtering on it.
-        if let Sort::Stat(text) = &self.sort {
+        if let Some(Sort::Stat(text)) = &self.sort {
             let id = resolve(text)?.id;
             let present = weights.iter().any(|w| w.id == id)
                 || groups.iter().flat_map(|g| &g.stats).any(|s| s.id == id);
@@ -566,6 +583,37 @@ impl Search {
             filters.truncate(keep);
         }
     }
+}
+
+/// A search for a unique by name or for an item base, without PoB's weights:
+/// capped in price (exalted orb equivalents) and in the level to wear it.
+pub fn item_query(
+    status: &str,
+    name: Option<&str>,
+    base: Option<&str>,
+    max_exalted: f64,
+    max_level: u32,
+) -> String {
+    let mut query = json!({
+        "query": {
+            "status": { "option": status },
+            "stats": [],
+            "filters": {
+                "trade_filters": { "filters": { "price": { "max": max_exalted } } },
+                "req_filters": { "filters": { "lvl": { "max": max_level } } },
+            },
+        },
+    });
+
+    if let Some(name) = name {
+        query["query"]["name"] = json!(name);
+    }
+
+    if let Some(base) = base {
+        query["query"]["type"] = json!(base);
+    }
+
+    query.to_string()
 }
 
 fn group_json(group: &Group) -> Value {
@@ -720,7 +768,7 @@ mod tests {
                 "rarity=any".parse().unwrap(),
                 "corrupted=false".parse().unwrap(),
             ],
-            sort: Sort::Sum(1),
+            sort: Some(Sort::Sum(1)),
             min_weight: Some(0.0),
             raw: Some(
                 json!({ "query": { "filters": { "trade_filters": { "filters": { "collapse": { "option": "true" } } } } } }),
@@ -762,7 +810,7 @@ mod tests {
     #[test]
     fn sorting_by_a_stat_adds_it_when_the_query_lacks_it() {
         let by = |text: &str| Additions {
-            sort: Sort::Stat(text.into()),
+            sort: Some(Sort::Stat(text.into())),
             ..Default::default()
         };
 
@@ -792,9 +840,48 @@ mod tests {
     #[test]
     fn sorting_by_a_missing_sum_is_an_error() {
         let additions = Additions {
-            sort: Sort::Sum(1),
+            sort: Some(Sort::Sum(1)),
             ..Default::default()
         };
         assert!(additions.apply(POB_QUERY, weights(), resolve).is_err());
+    }
+
+    #[test]
+    fn searches_by_name_without_pob_weights() {
+        let query = item_query(
+            "securable",
+            Some("Atziri's Step"),
+            Some("Cinched Boots"),
+            500.0,
+            80,
+        );
+        let additions = Additions {
+            sum: vec!["fire=1".parse().unwrap()],
+            ..Default::default()
+        };
+        let search = additions.apply(&query, Vec::new(), resolve).unwrap();
+
+        assert_eq!(search.query["query"]["name"], "Atziri's Step");
+        assert_eq!(search.query["query"]["type"], "Cinched Boots");
+        assert_eq!(search.query["sort"], json!({ "price": "asc" }));
+        assert_eq!(search.min_weight, None);
+
+        let by_sum = Additions {
+            sort: Some(Sort::Sum(1)),
+            ..additions.clone()
+        };
+        let search = by_sum.apply(&query, Vec::new(), resolve).unwrap();
+        assert_eq!(search.query["sort"], json!({ "statgroup.0": "desc" }));
+
+        let by_pob = Additions {
+            sort: Some(Sort::Pob),
+            ..Default::default()
+        };
+        assert!(by_pob.apply(&query, Vec::new(), resolve).is_err());
+        let min_weight = Additions {
+            min_weight: Some(1.0),
+            ..Default::default()
+        };
+        assert!(min_weight.apply(&query, Vec::new(), resolve).is_err());
     }
 }

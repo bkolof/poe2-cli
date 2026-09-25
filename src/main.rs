@@ -11,7 +11,7 @@ use poe2::ninja::{self, Character};
 use poe2::pob::model::{TradeQueryRequest, WhatIfRequest};
 use poe2::pob::{self, Pob};
 use poe2::source::{LoadedBuild, Source};
-use poe2::trade::query::{Additions, Count, Filter, Require, Search, Sort, Sum};
+use poe2::trade::query::{self, Additions, Count, Filter, Require, Search, Sort, Sum};
 use poe2::trade::{self, session};
 use serde::Serialize;
 use shop::SlotSearch;
@@ -32,6 +32,8 @@ struct Cli {
     command: Command,
 }
 
+// The commands are parsed once per run, so their size does not matter.
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum Command {
     /// PoB's sidebar stats for a build
@@ -142,6 +144,7 @@ enum Command {
     },
 }
 
+#[allow(clippy::large_enum_variant)]
 #[derive(Subcommand)]
 enum TradeCommand {
     /// Store your pathofexile.com session (the POESESSID cookie), read from stdin
@@ -157,11 +160,21 @@ enum TradeCommand {
     Search {
         /// The build: a poe.ninja URL, account/character, build site link, file, `-` or build code
         build: String,
-        /// The item slot, e.g. "Boots", "Ring 1", "Weapon 1"
+        /// The item slot, e.g. "Boots", "Ring 1", "Weapon 1"; a jewel socket as
+        /// "Jewel <node id>", or "jewel" for an empty allocated one
         #[arg(long)]
         slot: String,
         #[command(flatten)]
         trade: TradeArgs,
+        /// Search for a unique by name instead of PoB's weighted search
+        #[arg(long)]
+        name: Option<String>,
+        /// Search for an item base, e.g. "Silk Slippers", instead of PoB's weighted search
+        #[arg(long)]
+        base: Option<String>,
+        /// The jewels to search for in a jewel socket
+        #[arg(long, value_enum, default_value_t = JewelType::Base)]
+        jewel_type: JewelType,
         /// A stat the item must have, as `stat=min`, `stat=min..max` or `stat=..max`,
         /// e.g. "movement speed=25" (repeatable)
         #[arg(long)]
@@ -180,10 +193,11 @@ enum TradeCommand {
         /// rune_sockets=2, corrupted=false, indexed=1week, rarity=any (repeatable)
         #[arg(long)]
         filter: Vec<Filter>,
-        /// Which listings come first, and so get calculated: pob (PoB's weighted sum),
-        /// price (cheapest), sum:N (the Nth --sum) or stat:TEXT
-        #[arg(long, default_value = "pob")]
-        sort: Sort,
+        /// Which listings come first, and so get calculated: pob (PoB's weighted sum,
+        /// the default), price (cheapest; the default for --name and --base),
+        /// sum:N (the Nth --sum) or stat:TEXT
+        #[arg(long)]
+        sort: Option<Sort>,
         /// The minimum for PoB's weighted sum (default: half of what the current item scores)
         #[arg(long)]
         min_weight: Option<f64>,
@@ -248,6 +262,25 @@ const SCAN_SLOTS: &[&str] = &[
     "Ring 2",
     "Belt",
 ];
+
+#[derive(Clone, Copy, ValueEnum)]
+enum JewelType {
+    /// Jewels without a radius
+    Base,
+    /// Radius jewels, such as Time-Lost ones
+    Radius,
+}
+
+/// What a trade search looks for.
+enum Target {
+    /// PoB's weighted search, with the jewel type for a jewel socket.
+    Weighted(JewelType),
+    /// A unique by name, an item base, or both.
+    Item {
+        name: Option<String>,
+        base: Option<String>,
+    },
+}
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Status {
@@ -515,6 +548,9 @@ fn trade_command(command: TradeCommand, json: bool) -> Result<()> {
             build,
             slot,
             trade,
+            name,
+            base,
+            jewel_type,
             require,
             exclude,
             count,
@@ -544,7 +580,12 @@ fn trade_command(command: TradeCommand, json: bool) -> Result<()> {
             };
             let (pob, loaded) = self::open(&build)?;
             let market = TradeMarket::new(&trade, loaded.character.as_ref())?;
-            let search = market.query(&pob, &slot, &trade, &additions)?;
+            let target = if name.is_some() || base.is_some() {
+                Target::Item { name, base }
+            } else {
+                Target::Weighted(jewel_type)
+            };
+            let search = market.query(&pob, &slot, &trade, &target, &additions)?;
 
             if show_query {
                 return print_json(&search.1.query);
@@ -579,7 +620,9 @@ fn trade_command(command: TradeCommand, json: bool) -> Result<()> {
 
             for slot in &slots {
                 // A slot PoB cannot search is skipped; a failing search stops the scan.
-                match market.query(&pob, slot, &trade, &Additions::default()) {
+                let target = Target::Weighted(JewelType::Base);
+
+                match market.query(&pob, slot, &trade, &target, &Additions::default()) {
                     Ok(search) => {
                         found.push(market.search(&pob, &client, search, trade.by, trade.fetch)?)
                     }
@@ -643,32 +686,61 @@ impl TradeMarket {
         })
     }
 
-    /// PoB's weighted query for a slot, with the user's additions.
+    /// The query for a slot, PoB's weighted one or one by name or base, with
+    /// the user's additions.
     fn query(
         &self,
         pob: &Pob,
         slot: &str,
         trade: &TradeArgs,
+        target: &Target,
         additions: &Additions,
     ) -> Result<(String, Search)> {
+        let slot = pob.trade_slot(slot)?;
         let exalted = self
             .rates
             .divines("exalted")
             .context("poe.ninja has no exalted orb rate")?;
-        let generated = pob.trade_query(&TradeQueryRequest {
-            slot: slot.into(),
-            by: rank_id(trade.by).into(),
-            status: status_id(trade.status).into(),
-            // Without a budget, a very high cap still leaves out unpriced listings.
-            max_exalted: self.budget.map_or(1e7, |divines| divines / exalted),
-        })?;
-        let search = additions.apply(&generated.query, generated.weights, |text| {
+        // Without a budget, a very high cap still leaves out unpriced listings.
+        let max_exalted = self.budget.map_or(1e7, |divines| divines / exalted);
+        let resolve = |text: &str| {
             pob.trade_stats(text)?
                 .into_iter()
                 .next()
                 .with_context(|| format!("no trade site stat matches '{text}'"))
-        })?;
-        Ok((generated.slot, search))
+        };
+
+        let search = match target {
+            Target::Weighted(jewel_type) => {
+                let generated = pob.trade_query(&TradeQueryRequest {
+                    slot: slot.clone(),
+                    by: rank_id(trade.by).into(),
+                    status: status_id(trade.status).into(),
+                    max_exalted,
+                    jewel_type: jewel_type_id(*jewel_type).into(),
+                })?;
+                additions.apply(&generated.query, generated.weights, resolve)?
+            }
+            Target::Item { name, base } => {
+                let unique = name.as_deref().map(|n| pob.find_unique(n)).transpose()?;
+
+                if let (Some(unique), Some(base)) = (&unique, base)
+                    && !unique.base.eq_ignore_ascii_case(base)
+                {
+                    anyhow::bail!("{} is a {}, not a {base}", unique.name, unique.base);
+                }
+
+                let query = query::item_query(
+                    status_id(trade.status),
+                    unique.as_ref().map(|u| u.name.as_str()),
+                    unique.as_ref().map(|u| u.base.as_str()).or(base.as_deref()),
+                    max_exalted,
+                    pob.info()?.level,
+                );
+                additions.apply(&query, Vec::new(), resolve)?
+            }
+        };
+        Ok((slot, search))
     }
 
     /// Run a search, then calculate and rank the best matches it finds.
@@ -720,6 +792,13 @@ fn rank_id(rank: Rank) -> &'static str {
         Rank::Balanced => "balanced",
         Rank::Dps => "dps",
         Rank::Ehp => "ehp",
+    }
+}
+
+fn jewel_type_id(jewel_type: JewelType) -> &'static str {
+    match jewel_type {
+        JewelType::Base => "Base",
+        JewelType::Radius => "Radius",
     }
 }
 

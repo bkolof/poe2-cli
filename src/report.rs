@@ -366,11 +366,20 @@ pub fn trade_search(found: &SlotSearch, league: &str, rates: &Rates, by: Rank) {
         0 => String::new(),
         n => format!(" ({n} less important ones left out to fit the site's limits)"),
     };
-    println!(
-        "{} in {league}: PoB weighted {} stats{min}{dropped}",
-        found.slot,
-        search.weights.len()
-    );
+    if search.weights.is_empty() {
+        let item = &search.query["query"];
+        let wanted: Vec<&str> = [&item["name"], &item["type"]]
+            .iter()
+            .filter_map(|v| v.as_str())
+            .collect();
+        println!("{} in {league}: {}", found.slot, wanted.join(", "));
+    } else {
+        println!(
+            "{} in {league}: PoB weighted {} stats{min}{dropped}",
+            found.slot,
+            search.weights.len()
+        );
+    }
 
     for group in &search.groups {
         let stats = |weighted: bool| -> String {

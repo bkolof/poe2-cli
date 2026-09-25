@@ -43,6 +43,8 @@ names a character but not the account, ask for it.
 | What should I craft or buy for a slot? | `poe2 upgrades BUILD --slot Boots [--by ...]` |
 | Which uniques are worth buying? | `poe2 uniques-for BUILD --slot Boots [--budget 2]` |
 | Find the best items to buy | `poe2 trade search BUILD --slot Boots --budget 5 [--require "movement speed=25"] [--open]` |
+| Price a specific unique or base, calculated | `poe2 trade search BUILD --slot Boots --name "Atziri's Step"` or `--base "Silk Slippers"` |
+| Find a jewel | `poe2 trade search BUILD --slot jewel [--jewel-type radius]` |
 | Best upgrade in every slot | `poe2 trade scan BUILD --budget 5 [--slot Boots --slot Gloves]` |
 | Find a trade site stat | `poe2 trade stats "fire resistance"` |
 | Currency prices | `poe2 prices` |
@@ -54,7 +56,8 @@ first run downloads PoB (about 390 MB), so tell the user when that happens.
 
 Slots are named `Weapon 1`, `Weapon 2`, `Helmet`, `Body Armour`, `Gloves`,
 `Boots`, `Amulet`, `Ring 1`, `Ring 2`, `Belt`, `Charm 1` to `3`, `Flask 1`
-and `2`.
+and `2`. Jewel sockets are `Jewel <node id>`; for trade searches, `jewel`
+picks an empty allocated socket, or the error lists the filled ones.
 
 ### Buying
 
@@ -78,6 +81,13 @@ from poe.ninja, for the character's league.
   whisper; instant buyout listings are bought on the site.
 - Searches count against the trade site's rate limits; `poe2` waits when
   needed. Do not loop over many searches: use `trade scan` for several slots.
+
+- `--name` (a unique) or `--base` (an item base) replaces PoB's weighted
+  search: it finds those items, cheapest first, and still calculates each in
+  the slot. The advanced options below apply too, except `--min-weight` and
+  `--sort pob`.
+- In a jewel socket, `--jewel-type radius` searches radius jewels (Time-Lost)
+  instead of base jewels. Search both: they weigh different mods.
 
 #### Advanced searches
 

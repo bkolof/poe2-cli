@@ -48,6 +48,8 @@ poe2 upgrades BUILD --slot Boots          # best mods to add to a slot's item
 poe2 uniques-for BUILD --slot Boots --budget 2   # uniques that help, priced by poe.ninja
 poe2 trade login                          # store your POESESSID (read from stdin)
 poe2 trade search BUILD --slot Boots --budget 5 --require "movement speed=25" --open
+poe2 trade search BUILD --slot Boots --name "Atziri's Step"    # a unique, calculated
+poe2 trade search BUILD --slot jewel --jewel-type radius       # jewels for a socket
 poe2 trade scan BUILD --budget 5          # the best upgrade in every gear slot
 poe2 trade stats "fire resistance"        # trade site stats, for --require and friends
 poe2 prices                               # currency rates from poe.ninja
@@ -69,7 +71,9 @@ stats within ranges (`--require`), exclude stats (`--exclude`), ask for some
 of a set (`--count`), add weighted sums of its own (`--sum`), set any item
 filter (`--filter ilvl=80`, `es=150..`, `corrupted=false`, ...), sort by price,
 a sum or a stat (`--sort`), and merge in raw query JSON (`--query`);
-`--show-query` prints the query without searching. `trade scan` runs one
+`--show-query` prints the query without searching. `--name` and `--base`
+search for a unique or an item base instead of PoB's weights, and jewel
+sockets (`--slot jewel`) are searched for base or radius jewels. `trade scan` runs one
 weighted search per gear slot and ranks the upgrades side by side.
 
 Weighted searches need a logged-in session; the
