@@ -55,6 +55,49 @@ coding agents to use the CLI; it is linked into the agent's skills directory.
   `poe2 stats tests/fixtures/koftespies.pob`, or the live character
   `'Exile#1234/Koftespies'`.
 
+## Reference
+
+Facts checked against the live services; recheck them when something breaks.
+
+- **Trade API.**
+  - Search: `POST /api/trade2/search/poe2/<league>`, returning at most 100
+    listing ids. Fetch: `GET /api/trade2/fetch/<ids>?query=<search id>`, 10 ids
+    per request. Plain searches work anonymously; weighted ones need a login.
+  - Rate limits come from the response headers, one rule set per name in
+    `X-Rate-Limit-Rules` (`Ip`, and `Account` when logged in); the limiter
+    learns and merges them. Logged in, searches allowed 3 per 5s, 8 per 10s,
+    15 per 60s, 60 per 300s and 600 per 3h; fetches 6 and 12 per 4s, 16 per
+    12s, 100 per 300s and 1000 per 3h.
+  - `statgroup.N` in a sort counts only the weighted-sum groups, not every
+    stat group.
+  - "Query is too complex" depends on the stats and on how many weighted sums
+    a query has, not on a filter count: one sum passed with 89 filters, three
+    failed with 14. Searches retry with fewer of PoB's weights.
+  - Instant buyout listings carry a hideout token instead of a whisper.
+  - The price filter converts currencies at the site's own rates, which
+    differ from poe.ninja's; budgets are enforced again after fetching.
+- **poe.ninja.** Unique prices come from
+  `/poe2/api/economy/stash/current/item/overview?league=<name>&type=UniqueArmours`
+  (also `UniqueWeapons`, `UniqueAccessories`, `UniqueJewels`, `UniqueFlasks`,
+  `UniqueCharms`), with `primaryValue` in divines. Currency comes from
+  `/poe2/api/economy/exchange/current/overview?league=<name>&type=Currency`.
+  League names match the trade site's.
+- **PoB internals in use.**
+  - `CombinedDPS` is damage per use for skills with `skillData.showAverage`
+    (the "per use" skills).
+  - Skills granted by the tree carry `group.source = "Tree:<id>"`.
+  - The weighted-search defaults are `FullDPS` 1.0 and `TotalEHP` 0.5.
+  - `output.CharmLimit` is only set in breakdowns; the charm count comes from
+    the `CharmLimit` mods, which include quest rewards.
+  - Jewel sockets are slots named `Jewel <node id>`, usable when the node is
+    in `build.spec.allocNodes`.
+
+## Later
+
+Sharing with friends: `cargo-dist` release builds (not built outside Linux
+yet, and no GitHub Actions for now), a Claude Code plugin marketplace for the
+skill, and possibly a `poe2 mcp` mode for Claude Desktop.
+
 ## Conventions
 
 - Commit messages use conventional commits (`feat:`, `fix:`), and carry no
