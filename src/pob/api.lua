@@ -73,6 +73,9 @@ local function impact(baseOutput, output, points)
 		ehpPercent = percent("TotalEHP"),
 		life = (output.Life or 0) - (baseOutput.Life or 0),
 		energyShield = (output.EnergyShield or 0) - (baseOutput.EnergyShield or 0),
+		-- PoB keeps calculating reservations the Spirit no longer covers; in
+		-- game, skills would be disabled.
+		spiritShort = (output.SpiritUnreserved or 0) < 0 and (baseOutput.SpiritUnreserved or 0) >= 0,
 	}
 end
 

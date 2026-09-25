@@ -373,6 +373,10 @@ pub struct Group {
 #[derive(Debug, Serialize)]
 pub struct GroupStat {
     pub id: String,
+    /// Other trade stats with the same text, which any of may stand in for it:
+    /// e.g. two "+# to Spirit" stats that different mods roll.
+    #[serde(skip_serializing_if = "Vec::is_empty")]
+    pub alternatives: Vec<String>,
     pub text: String,
     #[serde(flatten)]
     pub range: Range,
@@ -404,7 +408,7 @@ impl Additions {
         &self,
         base_query: &str,
         weights: Vec<TradeWeight>,
-        resolve: impl Fn(&str) -> Result<TradeStat>,
+        resolve: impl Fn(&str) -> Result<Vec<TradeStat>>,
     ) -> Result<Search> {
         let weighted = !weights.is_empty();
         let mut query: Value =
@@ -431,7 +435,7 @@ impl Additions {
             .flatten();
 
         for group in &groups {
-            stats.push(group_json(group));
+            stats.extend(group_json(group));
         }
 
         for filter in &self.filter {
@@ -465,7 +469,19 @@ impl Additions {
 
                 json!({ format!("statgroup.{}", n - 1 + usize::from(weighted)): "desc" })
             }
-            Sort::Stat(text) => json!({ format!("stat.{}", resolve(text)?.id): "desc" }),
+            Sort::Stat(text) => {
+                let stats = resolve(text)?;
+
+                // Alternatives are summed in a weighted group after the others.
+                if stats.len() > 1 {
+                    json!({ format!("statgroup.{}", usize::from(weighted) + self.sum.len()): "desc" })
+                } else {
+                    let stat = stats
+                        .first()
+                        .with_context(|| format!("no trade site stat matches '{text}'"))?;
+                    json!({ format!("stat.{}", stat.id): "desc" })
+                }
+            }
         };
 
         if let Some(raw) = &self.raw {
@@ -483,12 +499,16 @@ impl Additions {
         })
     }
 
-    fn groups(&self, resolve: &impl Fn(&str) -> Result<TradeStat>) -> Result<Vec<Group>> {
+    fn groups(&self, resolve: &impl Fn(&str) -> Result<Vec<TradeStat>>) -> Result<Vec<Group>> {
         let stat = |text: &str, range: Range, weight: Option<f64>| -> Result<GroupStat> {
-            let found = resolve(text)?;
+            let mut found = resolve(text)?.into_iter();
+            let best = found
+                .next()
+                .with_context(|| format!("no trade site stat matches '{text}'"))?;
             Ok(GroupStat {
-                id: found.id,
-                text: found.text,
+                id: best.id,
+                alternatives: found.map(|s| s.id).collect(),
+                text: best.text,
                 range,
                 weight,
             })
@@ -553,14 +573,28 @@ impl Additions {
         // without filtering on it. PoB's weights do not count, as a search the
         // site finds too complex is retried with fewer of them.
         if let Some(Sort::Stat(text)) = &self.sort {
-            let id = resolve(text)?.id;
-            let present = groups.iter().flat_map(|g| &g.stats).any(|s| s.id == id);
+            let sorted = stat(text, Range::default(), None)?;
+            let present = groups
+                .iter()
+                .flat_map(|g| &g.stats)
+                .any(|s| s.id == sorted.id);
 
-            if !present {
+            if !sorted.alternatives.is_empty() {
+                // The site sorts by one stat; a sum of the alternatives is the
+                // value of whichever an item has.
+                groups.push(Group {
+                    kind: "weight",
+                    range: Range::default(),
+                    stats: vec![GroupStat {
+                        weight: Some(1.0),
+                        ..sorted
+                    }],
+                });
+            } else if !present {
                 groups.push(Group {
                     kind: "if",
                     range: Range::default(),
-                    stats: vec![stat(text, Range::default(), None)?],
+                    stats: vec![sorted],
                 });
             }
         }
@@ -612,21 +646,43 @@ pub fn item_query(
     query.to_string()
 }
 
-fn group_json(group: &Group) -> Value {
-    let filters: Vec<Value> = group
-        .stats
-        .iter()
-        .map(|s| {
-            let mut value = s.range.to_json();
+/// A group's stat groups in the query: usually one, but an `and` group
+/// cannot say "either", so a stat with alternatives needs any one of them in
+/// a group of its own.
+fn group_json(group: &Group) -> Vec<Value> {
+    let filters = |s: &GroupStat| -> Vec<Value> {
+        let mut value = s.range.to_json();
 
-            if let Some(weight) = s.weight {
-                value["weight"] = json!(weight);
-            }
+        if let Some(weight) = s.weight {
+            value["weight"] = json!(weight);
+        }
 
-            json!({ "id": s.id, "value": value })
-        })
-        .collect();
-    json!({ "type": group.kind, "value": group.range.to_json(), "filters": filters })
+        std::iter::once(&s.id)
+            .chain(&s.alternatives)
+            .map(|id| json!({ "id": id, "value": value }))
+            .collect()
+    };
+    let group_of = |kind: &str, range: Value, stats: Vec<Value>| json!({ "type": kind, "value": range, "filters": stats });
+
+    if group.kind != "and" {
+        let stats = group.stats.iter().flat_map(filters).collect();
+        return vec![group_of(group.kind, group.range.to_json(), stats)];
+    }
+
+    let (single, several): (Vec<&GroupStat>, Vec<&GroupStat>) =
+        group.stats.iter().partition(|s| s.alternatives.is_empty());
+    let mut groups = Vec::new();
+
+    if !single.is_empty() {
+        let stats = single.into_iter().flat_map(filters).collect();
+        groups.push(group_of("and", json!({}), stats));
+    }
+
+    for s in several {
+        groups.push(group_of("count", json!({ "min": 1 }), filters(s)));
+    }
+
+    groups
 }
 
 fn sort_name(sort: &Sort) -> String {
@@ -683,12 +739,22 @@ mod tests {
             .collect()
     }
 
-    fn resolve(text: &str) -> Result<TradeStat> {
-        Ok(TradeStat {
-            id: format!("pseudo.{}", text.replace(' ', "_")),
+    fn resolve(text: &str) -> Result<Vec<TradeStat>> {
+        let stat = |id: String| TradeStat {
+            id,
             text: text.into(),
-            kind: "pseudo".into(),
-        })
+            kind: "explicit".into(),
+        };
+
+        // Two stats share this text, as the two "+# to Spirit" stats do.
+        if text == "spirit" {
+            return Ok(vec![
+                stat("explicit.spirit_a".into()),
+                stat("explicit.spirit_b".into()),
+            ]);
+        }
+
+        Ok(vec![stat(format!("pseudo.{}", text.replace(' ', "_")))])
     }
 
     #[test]
@@ -820,8 +886,38 @@ mod tests {
         );
         assert_eq!(search.query["sort"], json!({ "stat.pseudo.life": "desc" }));
 
-        let search = by("spirit").apply(POB_QUERY, weights(), resolve).unwrap();
+        let search = by("rarity").apply(POB_QUERY, weights(), resolve).unwrap();
         assert_eq!(search.query["query"]["stats"][1]["type"], "if");
+
+        // Stats sharing a text are summed, and the sum is sorted by.
+        let search = by("spirit").apply(POB_QUERY, weights(), resolve).unwrap();
+        let group = &search.query["query"]["stats"][1];
+        assert_eq!(group["type"], "weight");
+        assert_eq!(group["filters"].as_array().unwrap().len(), 2);
+        assert_eq!(search.query["sort"], json!({ "statgroup.1": "desc" }));
+    }
+
+    #[test]
+    fn accepts_any_stat_sharing_a_text() {
+        let additions = Additions {
+            require: vec!["spirit=40".parse().unwrap(), "life=80".parse().unwrap()],
+            exclude: vec!["spirit".into()],
+            ..Default::default()
+        };
+        let search = additions.apply(POB_QUERY, weights(), resolve).unwrap();
+        let stats = search.query["query"]["stats"].as_array().unwrap();
+        let types: Vec<&str> = stats.iter().map(|g| g["type"].as_str().unwrap()).collect();
+
+        assert_eq!(types, ["weight", "and", "count", "not"]);
+        assert_eq!(stats[1]["filters"][0]["id"], "pseudo.life");
+        assert_eq!(
+            stats[2],
+            json!({ "type": "count", "value": { "min": 1 }, "filters": [
+                { "id": "explicit.spirit_a", "value": { "min": 40.0 } },
+                { "id": "explicit.spirit_b", "value": { "min": 40.0 } },
+            ] })
+        );
+        assert_eq!(stats[3]["filters"].as_array().unwrap().len(), 2);
     }
 
     #[test]

@@ -108,6 +108,10 @@ pub struct Impact {
     pub ehp_percent: f64,
     pub life: f64,
     pub energy_shield: f64,
+    /// It reserves more Spirit than the build has, which would disable skills
+    /// in game; PoB still counts them.
+    #[serde(default)]
+    pub spirit_short: bool,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

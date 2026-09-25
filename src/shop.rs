@@ -138,7 +138,9 @@ pub fn rank_listings(
     let mut best_so_far = 0.0;
 
     for listing in &mut priced {
-        let eligible = listing.divines.is_some() && listing.listing.meets_requirements;
+        let eligible = listing.divines.is_some()
+            && listing.listing.meets_requirements
+            && !listing.listing.impact.spirit_short;
 
         if eligible && listing.score > best_so_far {
             listing.best_value = true;
@@ -171,6 +173,7 @@ mod tests {
                 ehp_percent: 0.0,
                 life: 0.0,
                 energy_shield: 0.0,
+                spirit_short: false,
             },
         }
     }
@@ -192,6 +195,13 @@ mod tests {
             listing("unwearable", 5.0, 9.0, false),
             listing("downgrade", 1.0, -3.0, true),
             listing("over budget", 80.0, 9.0, true),
+            Listing {
+                impact: Impact {
+                    spirit_short: true,
+                    ..listing("spirit short", 3.0, 9.0, true).impact
+                },
+                ..listing("spirit short", 3.0, 9.0, true)
+            },
         ];
 
         let ranked = rank_listings(listings, &rates, Some(0.6), Rank::Dps);

@@ -8,7 +8,7 @@ use anyhow::{Context, Result};
 use clap::{Args, Parser, Subcommand, ValueEnum};
 use poe2::market::{self, Price, Rates};
 use poe2::ninja::{self, Character};
-use poe2::pob::model::{TradeQueryRequest, WhatIfRequest};
+use poe2::pob::model::{TradeQueryRequest, TradeStat, WhatIfRequest};
 use poe2::pob::{self, Pob};
 use poe2::source::{LoadedBuild, Source};
 use poe2::trade::price;
@@ -810,11 +810,17 @@ impl TradeMarket {
             .context("poe.ninja has no exalted orb rate")?;
         // Without a budget, a very high cap still leaves out unpriced listings.
         let max_exalted = self.budget.map_or(1e7, |divines| divines / exalted);
-        let resolve = |text: &str| {
-            pob.trade_stats(text)?
-                .into_iter()
-                .next()
-                .with_context(|| format!("no trade site stat matches '{text}'"))
+        let resolve = |text: &str| -> Result<Vec<TradeStat>> {
+            let stats = pob.trade_stats(text)?;
+            let best = stats
+                .first()
+                .with_context(|| format!("no trade site stat matches '{text}'"))?;
+            // Stats can share a text: two "+# to Spirit" stats come from different mods.
+            Ok(stats
+                .iter()
+                .filter(|s| s.text == best.text && s.kind == best.kind)
+                .cloned()
+                .collect())
         };
 
         let search = match target {

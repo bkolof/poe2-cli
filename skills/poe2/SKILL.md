@@ -93,6 +93,12 @@ from poe.ninja, for the character's league.
   wants, such as movement speed on boots, add `--require "movement speed=25"`
   (a text to find the trade site stat by, then a minimum). Ask the user about
   this for boots.
+- Items that would leave the build's Spirit short of its reservations (which
+  disables skills in game, though PoB still counts them) are never listed as
+  upgrades. When the current item gives Spirit, add
+  `--require "spirit=N"` to search items that keep enough.
+- A stat text several trade stats share (the two "+# to Spirit" stats) matches
+  any of them.
 - `--open` opens the search on the trade site in the user's browser, where
   they can buy. Only listings from sellers who trade in person carry a
   whisper; instant buyout listings are bought on the site.

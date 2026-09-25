@@ -342,11 +342,15 @@ pub fn uniques_for(slot: &str, league: &str, uniques: &[PricedUnique], rates: &R
             }
             _ => "no price".into(),
         };
-        let level = if unique.equippable {
+        let mut level = if unique.equippable {
             String::new()
         } else {
             format!(", needs level {}", c.level_required)
         };
+
+        if c.impact.spirit_short {
+            level.push_str(", leaves Spirit short");
+        }
         println!(
             "{:>6.1}  {}  {:<24}{} ({}{level})",
             score(&c.impact, by),
@@ -444,6 +448,19 @@ pub fn trade_search(found: &SlotSearch, league: &str, rates: &Rates, by: Rank) {
 
     if unwearable > 0 {
         println!("\n{unwearable} more would need higher attributes than the build has.");
+    }
+
+    let spirit_short = found
+        .listings
+        .iter()
+        .filter(|l| l.listing.impact.spirit_short)
+        .count();
+
+    if spirit_short > 0 {
+        println!(
+            "{spirit_short} more would leave too little Spirit for the build's reservations, disabling skills in game;\n\
+             require Spirit (e.g. --require \"spirit=30\") to search items that keep enough."
+        );
     }
 
     println!("\nTrade site: {}", found.url);
@@ -832,6 +849,7 @@ mod tests {
             ehp_percent: -4.0,
             life: 0.0,
             energy_shield: 0.0,
+            spirit_short: false,
         };
 
         assert_eq!(score(&impact, Rank::Balanced), 3.0);
