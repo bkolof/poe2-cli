@@ -5,14 +5,16 @@ use std::fs;
 use std::io::{self, IsTerminal, Read};
 
 use anyhow::{Context, Result};
-use clap::{Parser, Subcommand, ValueEnum};
-use poe2::market::{self, Price};
-use poe2::ninja;
-use poe2::pob::model::{StatRequirement, TradeQueryRequest, WhatIfRequest};
+use clap::{Args, Parser, Subcommand, ValueEnum};
+use poe2::market::{self, Price, Rates};
+use poe2::ninja::{self, Character};
+use poe2::pob::model::{TradeQueryRequest, WhatIfRequest};
 use poe2::pob::{self, Pob};
 use poe2::source::{LoadedBuild, Source};
+use poe2::trade::query::{Additions, Count, Filter, Require, Search, Sort, Sum};
 use poe2::trade::{self, session};
 use serde::Serialize;
+use shop::SlotSearch;
 
 /// Path of Exile 2 build analysis, backed by headless Path of Building.
 ///
@@ -150,35 +152,102 @@ enum TradeCommand {
     Logout,
     /// Find the best value items for a slot: PoB weights the search, then
     /// calculates every listing it fetches
+    ///
+    /// Stats are given by their trade site text or id (see `trade stats`).
     Search {
         /// The build: a poe.ninja URL, account/character, build site link, file, `-` or build code
         build: String,
         /// The item slot, e.g. "Boots", "Ring 1", "Weapon 1"
         #[arg(long)]
         slot: String,
-        /// The most to spend: `5` (divines), `5div`, `300ex` or `20c`
+        #[command(flatten)]
+        trade: TradeArgs,
+        /// A stat the item must have, as `stat=min`, `stat=min..max` or `stat=..max`,
+        /// e.g. "movement speed=25" (repeatable)
         #[arg(long)]
-        budget: Option<Price>,
-        /// What to optimise for
-        #[arg(long, value_enum, default_value_t = Rank::Balanced)]
-        by: Rank,
-        /// A stat the item must have, as `text=minimum`, e.g. "movement speed=25" (repeatable)
+        require: Vec<Require>,
+        /// A stat the item must not have (repeatable)
         #[arg(long)]
-        require: Vec<String>,
-        /// Which listings to include
-        #[arg(long, value_enum, default_value_t = Status::Available)]
-        status: Status,
-        /// How many of the best matching listings to calculate with PoB
-        #[arg(long, default_value_t = 30)]
-        fetch: usize,
+        exclude: Vec<String>,
+        /// At least N of some stats, as `N: stat, stat, ...` (repeatable)
+        #[arg(long)]
+        count: Vec<Count>,
+        /// A weighted sum of stats with an optional minimum, as `[min:] stat=weight, ...`,
+        /// e.g. "60: fire resistance=1, cold resistance=1" (repeatable)
+        #[arg(long)]
+        sum: Vec<Sum>,
+        /// An item filter, as `name=value` or `name=min..max`, e.g. ilvl=80, es=150..,
+        /// rune_sockets=2, corrupted=false, indexed=1week, rarity=any (repeatable)
+        #[arg(long)]
+        filter: Vec<Filter>,
+        /// Which listings come first, and so get calculated: pob (PoB's weighted sum),
+        /// price (cheapest), sum:N (the Nth --sum) or stat:TEXT
+        #[arg(long, default_value = "pob")]
+        sort: Sort,
+        /// The minimum for PoB's weighted sum (default: half of what the current item scores)
+        #[arg(long)]
+        min_weight: Option<f64>,
+        /// Trade site query JSON to merge into the search: a file, or `-` for stdin
+        #[arg(long)]
+        query: Option<String>,
+        /// Print the search's query instead of running it
+        #[arg(long)]
+        show_query: bool,
         /// Open the search on the trade site
         #[arg(long)]
         open: bool,
-        /// The league (default: the character's, or the current league)
+    },
+    /// The best value upgrades across the gear slots: one weighted search per slot
+    Scan {
+        /// The build: a poe.ninja URL, account/character, build site link, file, `-` or build code
+        build: String,
+        /// A slot to search (repeatable; default: weapons, armour, jewellery and belt)
         #[arg(long)]
-        league: Option<String>,
+        slot: Vec<String>,
+        #[command(flatten)]
+        trade: TradeArgs,
+    },
+    /// Look up trade site stats by text, for the stats in `trade search`
+    Stats {
+        query: String,
+        #[arg(long, default_value_t = 20)]
+        limit: usize,
     },
 }
+
+/// What every trade search takes.
+#[derive(Args)]
+struct TradeArgs {
+    /// The most to spend: `5` (divines), `5div`, `300ex` or `20c`
+    #[arg(long)]
+    budget: Option<Price>,
+    /// What to optimise for
+    #[arg(long, value_enum, default_value_t = Rank::Balanced)]
+    by: Rank,
+    /// Which listings to include
+    #[arg(long, value_enum, default_value_t = Status::Available)]
+    status: Status,
+    /// How many of the best matching listings to calculate with PoB, per search
+    #[arg(long, default_value_t = 30)]
+    fetch: usize,
+    /// The league (default: the character's, or the current league)
+    #[arg(long)]
+    league: Option<String>,
+}
+
+/// The slots `trade scan` searches by default.
+const SCAN_SLOTS: &[&str] = &[
+    "Weapon 1",
+    "Weapon 2",
+    "Helmet",
+    "Body Armour",
+    "Gloves",
+    "Boots",
+    "Amulet",
+    "Ring 1",
+    "Ring 2",
+    "Belt",
+];
 
 #[derive(Clone, Copy, ValueEnum)]
 enum Status {
@@ -445,89 +514,205 @@ fn trade_command(command: TradeCommand, json: bool) -> Result<()> {
         TradeCommand::Search {
             build,
             slot,
-            budget,
-            by,
+            trade,
             require,
-            status,
-            fetch,
+            exclude,
+            count,
+            sum,
+            filter,
+            sort,
+            min_weight,
+            query,
+            show_query,
             open,
-            league,
         } => {
-            let require = require
-                .iter()
-                .map(|r| parse_requirement(r))
-                .collect::<Result<Vec<_>>>()?;
-            let (pob, loaded) = self::open(&build)?;
-            let league = shop::league(league, loaded.character.as_ref())?;
-            let rates = market::currency_rates(&league)?;
-            let budget = shop::budget_in_divines(budget.as_ref(), &rates)?;
-            let exalted = rates
-                .divines("exalted")
-                .context("poe.ninja has no exalted orb rate")?;
-            let query = pob.trade_query(&TradeQueryRequest {
-                slot,
-                by: rank_id(by).into(),
-                status: status_id(status).into(),
-                // Without a budget, a very high cap still leaves out unpriced listings.
-                max_exalted: budget.map_or(1e7, |divines| divines / exalted),
+            let raw = query
+                .map(|path| -> Result<serde_json::Value> {
+                    serde_json::from_str(&read_input(&path)?)
+                        .with_context(|| format!("{path} is not JSON"))
+                })
+                .transpose()?;
+            let additions = Additions {
                 require,
-            })?;
+                exclude,
+                count,
+                sum,
+                filter,
+                sort,
+                min_weight,
+                raw,
+            };
+            let (pob, loaded) = self::open(&build)?;
+            let market = TradeMarket::new(&trade, loaded.character.as_ref())?;
+            let search = market.query(&pob, &slot, &trade, &additions)?;
+
+            if show_query {
+                return print_json(&search.1.query);
+            }
 
             let client = trade::Client::new()?;
-            let body: serde_json::Value = serde_json::from_str(&query.query)?;
-            let search = client.search(&league, &body).map_err(|error| {
-                if client.has_session() {
-                    error
-                } else {
-                    error.context("weighted searches need a session: run `poe2 trade login`")
-                }
-            })?;
-            let ids: Vec<String> = search.result.iter().take(fetch).cloned().collect();
-            let bodies = client.fetch(&search.id, &ids)?;
-            let listings = shop::rank_listings(
-                pob.evaluate_listings(&query.slot, &bodies)?,
-                &rates,
-                budget,
-                by,
-            );
-            let url = trade::search_url(&league, &search.id);
+            let found = market.search(&pob, &client, search, trade.by, trade.fetch)?;
 
             if open {
-                open::that(&url).with_context(|| format!("cannot open {url}"))?;
+                open::that(&found.url).with_context(|| format!("cannot open {}", found.url))?;
             }
 
             if json {
+                return print_json(
+                    &serde_json::json!({ "league": market.league, "search": found }),
+                );
+            }
+
+            report::trade_search(&found, &market.league, &market.rates, trade.by);
+        }
+        TradeCommand::Scan { build, slot, trade } => {
+            let slots = if slot.is_empty() {
+                SCAN_SLOTS.iter().map(|s| s.to_string()).collect()
+            } else {
+                slot
+            };
+            let (pob, loaded) = open(&build)?;
+            let market = TradeMarket::new(&trade, loaded.character.as_ref())?;
+            let client = trade::Client::new()?;
+            let mut found = Vec::new();
+            let mut skipped = Vec::new();
+
+            for slot in &slots {
+                // A slot PoB cannot search is skipped; a failing search stops the scan.
+                match market.query(&pob, slot, &trade, &Additions::default()) {
+                    Ok(search) => {
+                        found.push(market.search(&pob, &client, search, trade.by, trade.fetch)?)
+                    }
+                    Err(error) => skipped.push((slot.clone(), error.to_string())),
+                }
+            }
+
+            if json {
+                let skipped: Vec<_> = skipped
+                    .iter()
+                    .map(|(slot, reason)| serde_json::json!({ "slot": slot, "reason": reason }))
+                    .collect();
                 return print_json(&serde_json::json!({
-                    "league": league,
-                    "slot": query.slot,
-                    "url": url,
-                    "total": search.total,
-                    "weights": query.weights,
-                    "required": query.required,
-                    "listings": listings,
+                    "league": market.league,
+                    "searches": found,
+                    "skipped": skipped,
                 }));
             }
 
-            report::trade_search(&query, &league, search.total, &listings, &rates, &url, by);
+            report::trade_scan(
+                &found,
+                &skipped,
+                &market.league,
+                &market.rates,
+                market.budget,
+                trade.by,
+            );
+        }
+        TradeCommand::Stats { query, limit } => {
+            let pob = Pob::start(&pob::ensure_installed()?)?;
+            let stats = pob.trade_stats(&query)?;
+
+            if json {
+                return print_json(&stats);
+            }
+
+            report::trade_stats(&stats, limit);
         }
     }
 
     Ok(())
 }
 
-/// `movement speed=25` into a stat to look up and its minimum.
-fn parse_requirement(text: &str) -> Result<StatRequirement> {
-    let (stat, min) = text
-        .rsplit_once('=')
-        .with_context(|| format!("'{text}' is not `stat text=minimum`"))?;
-    let min = min
-        .trim()
-        .parse()
-        .with_context(|| format!("'{min}' is not a number"))?;
-    Ok(StatRequirement {
-        stat: stat.trim().to_string(),
-        min,
-    })
+/// Prices and the budget for trade searches in one league.
+struct TradeMarket {
+    league: String,
+    rates: Rates,
+    /// In divines.
+    budget: Option<f64>,
+}
+
+impl TradeMarket {
+    fn new(trade: &TradeArgs, character: Option<&Character>) -> Result<Self> {
+        let league = shop::league(trade.league.clone(), character)?;
+        let rates = market::currency_rates(&league)?;
+        let budget = shop::budget_in_divines(trade.budget.as_ref(), &rates)?;
+        Ok(Self {
+            league,
+            rates,
+            budget,
+        })
+    }
+
+    /// PoB's weighted query for a slot, with the user's additions.
+    fn query(
+        &self,
+        pob: &Pob,
+        slot: &str,
+        trade: &TradeArgs,
+        additions: &Additions,
+    ) -> Result<(String, Search)> {
+        let exalted = self
+            .rates
+            .divines("exalted")
+            .context("poe.ninja has no exalted orb rate")?;
+        let generated = pob.trade_query(&TradeQueryRequest {
+            slot: slot.into(),
+            by: rank_id(trade.by).into(),
+            status: status_id(trade.status).into(),
+            // Without a budget, a very high cap still leaves out unpriced listings.
+            max_exalted: self.budget.map_or(1e7, |divines| divines / exalted),
+        })?;
+        let search = additions.apply(&generated.query, generated.weights, |text| {
+            pob.trade_stats(text)?
+                .into_iter()
+                .next()
+                .with_context(|| format!("no trade site stat matches '{text}'"))
+        })?;
+        Ok((generated.slot, search))
+    }
+
+    /// Run a search, then calculate and rank the best matches it finds.
+    fn search(
+        &self,
+        pob: &Pob,
+        client: &trade::Client,
+        (slot, mut search): (String, Search),
+        by: Rank,
+        fetch: usize,
+    ) -> Result<SlotSearch> {
+        // What a search costs the site depends on its stats and groups, so a
+        // search it finds too complex is retried with fewer of PoB's weights.
+        let result = loop {
+            match client.search(&self.league, &search.query) {
+                Err(error) if error.is::<trade::TooComplex>() && search.weights.len() > 1 => {
+                    search.keep_weights(search.weights.len() * 2 / 3);
+                }
+                result => break result,
+            }
+        };
+        let result = result.map_err(|error| {
+            if client.has_session() {
+                error
+            } else {
+                error.context("weighted searches need a session: run `poe2 trade login`")
+            }
+        })?;
+        let ids: Vec<String> = result.result.iter().take(fetch).cloned().collect();
+        let bodies = client.fetch(&result.id, &ids)?;
+        let listings = shop::rank_listings(
+            pob.evaluate_listings(&slot, &bodies)?,
+            &self.rates,
+            self.budget,
+            by,
+        );
+        Ok(SlotSearch {
+            url: trade::search_url(&self.league, &result.id),
+            slot,
+            total: result.total,
+            search,
+            listings,
+        })
+    }
 }
 
 fn rank_id(rank: Rank) -> &'static str {

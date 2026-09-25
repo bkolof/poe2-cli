@@ -4,7 +4,7 @@
 
 use std::path::PathBuf;
 
-use poe2::pob::model::WhatIfRequest;
+use poe2::pob::model::{TradeQueryRequest, WhatIfRequest};
 use poe2::pob::{self, Pob};
 
 const BUILD_CODE: &str = include_str!("fixtures/koftespies.pob");
@@ -148,6 +148,24 @@ fn analyses_a_build() {
     assert_eq!(step.base, "Cinched Boots");
     assert!(uniques.candidates.iter().all(|c| !c.base.contains("Ring")));
 
+    let query = pob
+        .trade_query(&TradeQueryRequest {
+            slot: "boots".into(),
+            by: "balanced".into(),
+            status: "securable".into(),
+            max_exalted: 1000.0,
+        })
+        .unwrap();
+    assert_eq!(query.slot, "Boots");
+    let json: serde_json::Value = serde_json::from_str(&query.query).unwrap();
+    assert_eq!(
+        json["query"]["stats"][0]["filters"]
+            .as_array()
+            .unwrap()
+            .len(),
+        query.weights.len()
+    );
+
     let boots = pob.slot_upgrades("boots").unwrap();
     assert_eq!((boots.free_prefixes, boots.free_suffixes), (1, 0));
     assert!(
@@ -181,6 +199,12 @@ fn searches_game_data_and_build_sites() {
         Some("https://pobb.in/pob/abc123")
     );
     assert_eq!(pob.build_site_url("https://example.com/x").unwrap(), None);
+
+    let stats = pob.trade_stats("movement speed").unwrap();
+    assert_eq!(stats[0].id, "pseudo.pseudo_increased_movement_speed");
+    let by_id = pob.trade_stats("explicit.stat_3372524247").unwrap();
+    assert_eq!(by_id.len(), 1);
+    assert!(pob.trade_stats("no such stat").unwrap().is_empty());
 }
 
 /// `<PlayerStat stat="Life" value="1754"/>` entries from the build XML.

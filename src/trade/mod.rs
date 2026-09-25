@@ -2,6 +2,7 @@
 //! within the site's rate limits, with the user's session when there is one.
 
 pub mod limits;
+pub mod query;
 pub mod session;
 
 use std::time::Duration;
@@ -24,6 +25,20 @@ pub struct SearchResult {
     pub result: Vec<String>,
     pub total: Option<u64>,
 }
+
+/// The site refuses searches whose stats cost too much to run. The cost
+/// depends on the stats (a pseudo total covers many mods), so it cannot be
+/// known before searching.
+#[derive(Debug)]
+pub struct TooComplex(String);
+
+impl std::fmt::Display for TooComplex {
+    fn fmt(&self, f: &mut std::fmt::Formatter) -> std::fmt::Result {
+        write!(f, "the trade site refused the search: {}", self.0)
+    }
+}
+
+impl std::error::Error for TooComplex {}
 
 pub struct Client {
     agent: ureq::Agent,
@@ -178,6 +193,10 @@ fn read_body(mut response: Response<ureq::Body>) -> Result<String> {
         return Err(anyhow!(
             "the trade site refused the request ({message}); if you logged in, the session may have expired: run `poe2 trade login`"
         ));
+    }
+
+    if message.starts_with("Query is too complex") {
+        return Err(TooComplex(message).into());
     }
 
     Err(anyhow!("the trade site refused the search: {message}"))

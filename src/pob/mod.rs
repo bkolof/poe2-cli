@@ -18,7 +18,7 @@ pub use code::{decode_build_code, encode_build_code};
 pub use install::{VERSION, ensure_installed, installed_dir};
 use model::{
     BuildInfo, GemInfo, Listing, ModInfo, SidebarRow, SkillDps, SlotUniques, SlotUpgrades,
-    TradeQuery, TradeQueryRequest, TreeSuggestion, UniqueInfo, WhatIf, WhatIfRequest,
+    TradeQuery, TradeQueryRequest, TradeStat, TreeSuggestion, UniqueInfo, WhatIf, WhatIfRequest,
 };
 
 unsafe extern "C-unwind" {
@@ -103,6 +103,11 @@ impl Pob {
     pub fn trade_query(&self, request: &TradeQueryRequest) -> Result<TradeQuery> {
         let request = self.lua.to_value(request)?;
         self.call("tradeQuery", request)
+    }
+
+    /// Trade site stats matching a text or id, best match first.
+    pub fn trade_stats(&self, query: &str) -> Result<Vec<TradeStat>> {
+        self.call("tradeStats", query)
     }
 
     /// Calculate trade listings (fetch response bodies) in a slot.

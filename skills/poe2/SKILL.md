@@ -43,6 +43,8 @@ names a character but not the account, ask for it.
 | What should I craft or buy for a slot? | `poe2 upgrades BUILD --slot Boots [--by ...]` |
 | Which uniques are worth buying? | `poe2 uniques-for BUILD --slot Boots [--budget 2]` |
 | Find the best items to buy | `poe2 trade search BUILD --slot Boots --budget 5 [--require "movement speed=25"] [--open]` |
+| Best upgrade in every slot | `poe2 trade scan BUILD --budget 5 [--slot Boots --slot Gloves]` |
+| Find a trade site stat | `poe2 trade stats "fire resistance"` |
 | Currency prices | `poe2 prices` |
 | PoB code for the GUI | `poe2 export BUILD` |
 | Mods, gems, uniques | `poe2 mods "movement speed" [--base "Silk Slippers"]`, `poe2 gems NAME`, `poe2 uniques NAME` |
@@ -72,9 +74,39 @@ from poe.ninja, for the character's league.
   (a text to find the trade site stat by, then a minimum). Ask the user about
   this for boots.
 - `--open` opens the search on the trade site in the user's browser, where
-  they can buy or whisper. Results also carry the whisper message.
+  they can buy. Only listings from sellers who trade in person carry a
+  whisper; instant buyout listings are bought on the site.
 - Searches count against the trade site's rate limits; `poe2` waits when
-  needed. Do not loop over many searches: one slot at a time.
+  needed. Do not loop over many searches: use `trade scan` for several slots.
+
+#### Advanced searches
+
+PoB's weighted sum stays the core of every search. On top of it (all
+repeatable; a stat is a text to find it by or a trade id from `trade stats`):
+
+| Option | Meaning |
+|---|---|
+| `--require "stat=25"`, `"stat=25..35"`, `"stat=..10"` | must have the stat in that range |
+| `--exclude "stat"` | must not have the stat |
+| `--count "2: stat, stat, stat"` | at least that many of the stats |
+| `--sum "[min:] stat=weight, ..."` | an extra weighted sum, e.g. `"60: fire resistance=1, cold resistance=1, lightning resistance=1"` |
+| `--filter name=value` | an item filter: `ilvl`, `quality`, `es`, `ar`, `ev`, `spirit`, `rune_sockets`, `dps`, `pdps`, `edps`, `aps`, `crit`, `block`, `lvl`, `str`/`dex`/`int` (ranges like `80`, `80..`, `..82`); `rarity` (`rare`, `unique`, `any`, ...), `corrupted`, `fractured_item`, `desecrated`, `sanctified`, `mirrored`, ... (`true`/`false`); `indexed` (`1day`, `1week`, ...); `account`; `collapse=true` |
+| `--sort pob\|price\|sum:N\|stat:TEXT` | which listings come first, and so get calculated |
+| `--min-weight N` | the minimum for PoB's sum; the output shows PoB's default |
+| `--query FILE` | raw trade query JSON merged in last |
+| `--show-query` | print the query without searching (needs no login) |
+
+- `--sort price` returns the cheapest listings whose PoB sum reaches the
+  minimum. PoB's default minimum is half of what the current item scores, and
+  the sum only approximates what PoB then calculates, so most of the cheapest
+  listings are not upgrades. Raise `--min-weight` well above the default to
+  skip them; the default sort (`pob`) usually finds more real upgrades.
+- Stat texts match the most specific trade stat, preferring pseudo totals
+  ("fire resistance" is "+#% total to Fire Resistance"). Check with
+  `trade stats` when a text is ambiguous.
+- The site limits how costly a search is, and extra weighted sums cost the
+  most. When it refuses a search, `poe2` retries with fewer of PoB's least
+  important weights and says how many it left out.
 
 ### Trade login
 

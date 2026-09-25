@@ -7,9 +7,9 @@ use poe2::pob::model::{
 };
 
 use crate::Rank;
-use crate::shop::{PricedListing, PricedUnique};
+use crate::shop::{PricedListing, PricedUnique, SlotSearch};
 use poe2::market::Rates;
-use poe2::pob::model::TradeQuery;
+use poe2::pob::model::TradeStat;
 
 pub fn header(info: &BuildInfo, character: Option<&Character>) {
     let class = info.ascendancy.as_deref().unwrap_or(&info.class);
@@ -357,33 +357,60 @@ pub fn uniques_for(slot: &str, league: &str, uniques: &[PricedUnique], rates: &R
     }
 }
 
-pub fn trade_search(
-    query: &TradeQuery,
-    league: &str,
-    total: Option<u64>,
-    listings: &[PricedListing],
-    rates: &Rates,
-    url: &str,
-    by: Rank,
-) {
+pub fn trade_search(found: &SlotSearch, league: &str, rates: &Rates, by: Rank) {
+    let search = &found.search;
+    let min = search
+        .min_weight
+        .map_or(String::new(), |min| format!(", sum at least {min:.1}"));
+    let dropped = match search.dropped_weights {
+        0 => String::new(),
+        n => format!(" ({n} less important ones left out to fit the site's limits)"),
+    };
     println!(
-        "{} in {league}: PoB weighted {} stats",
-        query.slot,
-        query.weights.len()
+        "{} in {league}: PoB weighted {} stats{min}{dropped}",
+        found.slot,
+        search.weights.len()
     );
 
-    for requirement in &query.required {
-        println!("  requires {} >= {}", requirement.text, requirement.min);
+    for group in &search.groups {
+        let stats = |weighted: bool| -> String {
+            group
+                .stats
+                .iter()
+                .map(|s| match (weighted, s.weight) {
+                    (true, Some(weight)) => format!("{} x{weight}", s.text),
+                    _ => format!("{} {}", s.text, s.range).trim_end().to_string(),
+                })
+                .collect::<Vec<_>>()
+                .join(", ")
+        };
+
+        match group.kind {
+            "and" => println!("  requires {}", stats(false)),
+            "not" => println!("  excludes {}", stats(false)),
+            "count" => println!(
+                "  at least {} of: {}",
+                group.range.min.unwrap_or(1.0),
+                stats(false)
+            ),
+            "weight" => println!("  weighted sum {}: {}", group.range, stats(true)),
+            _ => {}
+        }
+    }
+
+    if !search.filters.is_empty() {
+        println!("  filters: {}", search.filters.join(", "));
     }
 
     println!(
-        "{} listings match; calculated the best {} with PoB, ranked by {}.\n",
-        total.map_or("Some".into(), |t| t.to_string()),
-        listings.len(),
+        "{} listings match, sorted by {}; calculated the best {} with PoB, ranked by {}.\n",
+        found.total.map_or("Some".into(), |t| t.to_string()),
+        search.sort,
+        found.listings.len(),
         rank_name(by)
     );
 
-    let best: Vec<&PricedListing> = listings.iter().filter(|l| l.best_value).collect();
+    let best: Vec<&PricedListing> = found.listings.iter().filter(|l| l.best_value).collect();
 
     if best.is_empty() {
         println!("No listing improves the build.");
@@ -392,21 +419,15 @@ pub fn trade_search(
     }
 
     for listing in &best {
-        let l = &listing.listing;
-        let price = listing.divines.map_or("?".into(), |d| rates.format(d));
-        println!(
-            "{price:>9}  {:>6.1}  {}  {}",
-            listing.score,
-            impact_columns(&l.impact),
-            l.name
-        );
+        println!("{}", listing_line(listing, rates));
 
-        if let Some(whisper) = &l.whisper {
+        if let Some(whisper) = &listing.listing.whisper {
             println!("{:>19}{whisper}", "");
         }
     }
 
-    let unwearable = listings
+    let unwearable = found
+        .listings
         .iter()
         .filter(|l| !l.listing.meets_requirements)
         .count();
@@ -415,7 +436,89 @@ pub fn trade_search(
         println!("\n{unwearable} more would need higher attributes than the build has.");
     }
 
-    println!("\nTrade site: {url}");
+    println!("\nTrade site: {}", found.url);
+}
+
+/// Each slot's best value listings, the slots with the biggest upgrade first.
+pub fn trade_scan(
+    found: &[SlotSearch],
+    skipped: &[(String, String)],
+    league: &str,
+    rates: &Rates,
+    budget: Option<f64>,
+    by: Rank,
+) {
+    let within = budget.map_or(String::new(), |b| format!(" within {}", rates.format(b)));
+    println!(
+        "Best upgrades per slot in {league}{within}, ranked by {}.",
+        rank_name(by)
+    );
+    println!("Each slot's biggest upgrade comes first, then cheaper ones.\n");
+
+    fn best(search: &SlotSearch) -> Vec<&PricedListing> {
+        let mut best: Vec<&PricedListing> =
+            search.listings.iter().filter(|l| l.best_value).collect();
+        best.reverse();
+        best
+    }
+
+    let mut slots: Vec<&SlotSearch> = found.iter().collect();
+    slots.sort_by(|a, b| {
+        let top = |s: &SlotSearch| best(s).first().map_or(0.0, |l| l.score);
+        top(b).total_cmp(&top(a))
+    });
+
+    for search in &slots {
+        let listings = best(search);
+
+        if listings.is_empty() {
+            println!("{:<12} no upgrade found", search.slot);
+        }
+
+        for (i, listing) in listings.iter().enumerate() {
+            let slot = if i == 0 { search.slot.as_str() } else { "" };
+            println!("{slot:<12}{}", listing_line(listing, rates));
+        }
+    }
+
+    for (slot, reason) in skipped {
+        println!("{slot:<12} skipped: {reason}");
+    }
+
+    println!("\nTrade site searches:");
+
+    for search in &slots {
+        println!("  {:<12}{}", search.slot, search.url);
+    }
+}
+
+pub fn trade_stats(stats: &[TradeStat], limit: usize) {
+    if stats.is_empty() {
+        println!("No trade site stat matches.");
+    }
+
+    for stat in stats.iter().take(limit) {
+        println!(
+            "{:<9} {:<45} {}",
+            stat.kind,
+            stat.id,
+            stat.text.replace('\n', " / ")
+        );
+    }
+
+    if stats.len() > limit {
+        println!("... and {} more", stats.len() - limit);
+    }
+}
+
+fn listing_line(listing: &PricedListing, rates: &Rates) -> String {
+    let price = listing.divines.map_or("?".into(), |d| rates.format(d));
+    format!(
+        "{price:>9}  {:>6.1}  {}  {}",
+        listing.score,
+        impact_columns(&listing.listing.impact),
+        listing.listing.name
+    )
 }
 
 pub fn prices(rates: &Rates, limit: usize) {

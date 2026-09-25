@@ -48,6 +48,8 @@ poe2 upgrades BUILD --slot Boots          # best mods to add to a slot's item
 poe2 uniques-for BUILD --slot Boots --budget 2   # uniques that help, priced by poe.ninja
 poe2 trade login                          # store your POESESSID (read from stdin)
 poe2 trade search BUILD --slot Boots --budget 5 --require "movement speed=25" --open
+poe2 trade scan BUILD --budget 5          # the best upgrade in every gear slot
+poe2 trade stats "fire resistance"        # trade site stats, for --require and friends
 poe2 prices                               # currency rates from poe.ninja
 poe2 export BUILD                         # build code for PoB's "Import from code"
 poe2 chars 'Name#1234'                    # an account's public characters
@@ -62,7 +64,15 @@ Every command takes `--json`. Budgets are in divines unless marked: `5`,
 `trade search` lets PoB generate a weighted trade site search (its own trade
 query generator, weighting each stat by what it is worth to the build),
 fetches the best matches and calculates every one with PoB, then lists the
-best value at each price. Weighted searches need a logged-in session; the
+best value at each price. On top of PoB's weights, a search can require
+stats within ranges (`--require`), exclude stats (`--exclude`), ask for some
+of a set (`--count`), add weighted sums of its own (`--sum`), set any item
+filter (`--filter ilvl=80`, `es=150..`, `corrupted=false`, ...), sort by price,
+a sum or a stat (`--sort`), and merge in raw query JSON (`--query`);
+`--show-query` prints the query without searching. `trade scan` runs one
+weighted search per gear slot and ranks the upgrades side by side.
+
+Weighted searches need a logged-in session; the
 POESESSID is stored in the config directory, readable only by you. Requests
 stay within the trade site's rate limits, which are tracked on disk across
 runs.

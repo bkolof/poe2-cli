@@ -4,6 +4,7 @@ use anyhow::{Context, Result};
 use poe2::market::{self, Price, Rates};
 use poe2::ninja::Character;
 use poe2::pob::model::{Listing, UniqueCandidate};
+use poe2::trade::query::Search;
 use serde::Serialize;
 
 use crate::Rank;
@@ -84,6 +85,19 @@ pub struct PricedListing {
     pub score: f64,
     /// No other listing is both at least as good and cheaper.
     pub best_value: bool,
+}
+
+/// A trade search for one slot and the listings it found, calculated.
+#[derive(Debug, Serialize)]
+pub struct SlotSearch {
+    pub slot: String,
+    /// The search on the trade site, where the listings can be bought.
+    pub url: String,
+    /// How many listings match, as far as the site counts.
+    pub total: Option<u64>,
+    #[serde(flatten)]
+    pub search: Search,
+    pub listings: Vec<PricedListing>,
 }
 
 /// Price the listings and mark the best value ones: going up in price, each
