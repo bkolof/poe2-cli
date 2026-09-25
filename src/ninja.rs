@@ -7,7 +7,7 @@ use std::io::{BufRead, BufReader};
 use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
-use serde::Deserialize;
+use serde::{Deserialize, Serialize};
 
 const BASE_URL: &str = "https://poe.ninja/poe2/api";
 
@@ -27,6 +27,35 @@ pub struct Character {
     pub class: String,
     pub league: String,
     pub path_of_building_export: String,
+}
+
+/// A character in an account's list, before fetching its model.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct CharacterSummary {
+    pub name: String,
+    pub level: u32,
+    /// poe.ninja leaves this empty for characters it has not processed.
+    pub class_name: Option<String>,
+    pub league: String,
+    pub league_url: String,
+    pub is_current: bool,
+}
+
+impl CharacterSummary {
+    pub fn profile_url(&self, account: &str) -> String {
+        format!(
+            "https://poe.ninja/poe2/profile/{}/{}/character/{}",
+            account_slug(account),
+            self.league_url,
+            self.name
+        )
+    }
+}
+
+/// poe.ninja writes `Name#1234` as `Name-1234` in its URLs.
+pub fn account_slug(account: &str) -> String {
+    account.replace('#', "-")
 }
 
 /// Parse `https://poe.ninja/poe2/profile/<account>/<league>/character/<name>`.
@@ -61,6 +90,24 @@ pub fn parse_profile_url(url: &str) -> Result<CharacterRef> {
     }
 }
 
+/// Every character on an account's public profile.
+pub fn list_characters(account: &str) -> Result<Vec<CharacterSummary>> {
+    let agent = agent();
+    let account = account_slug(account);
+    let version = read_sse_version(&agent, &format!("{BASE_URL}/events/characters/{account}"))?
+        .with_context(|| {
+            format!(
+                "poe.ninja has no account {account}; check the name and that the profile is public"
+            )
+        })?;
+
+    Ok(agent
+        .get(format!("{BASE_URL}/profile/characters/{account}/{version}"))
+        .call()?
+        .body_mut()
+        .read_json()?)
+}
+
 pub fn fetch_character(character: &CharacterRef) -> Result<Character> {
     #[derive(Deserialize)]
     struct Model {
@@ -68,10 +115,7 @@ pub fn fetch_character(character: &CharacterRef) -> Result<Character> {
         char_model: Character,
     }
 
-    let agent: ureq::Agent = ureq::Agent::config_builder()
-        .timeout_global(Some(Duration::from_secs(15)))
-        .build()
-        .into();
+    let agent = agent();
     let path = format!(
         "{}/{}/{}",
         character.account, character.league, character.character
@@ -91,6 +135,13 @@ pub fn fetch_character(character: &CharacterRef) -> Result<Character> {
         .read_json()?;
 
     Ok(model.char_model)
+}
+
+fn agent() -> ureq::Agent {
+    ureq::Agent::config_builder()
+        .timeout_global(Some(Duration::from_secs(15)))
+        .build()
+        .into()
 }
 
 /// The first event's version, or `None` when poe.ninja answers `event: notfound`.

@@ -1,67 +1,91 @@
 ---
 name: poe2
 description: >-
-  Analyse Path of Exile 2 characters with the `poe2` CLI, which calculates
-  stats with the real Path of Building engine. Use when the user asks about a
-  PoE2 character or build: its DPS, defences, resistances, EHP, max hit, what
-  their main skill does, or wants a PoB build code. Triggers: a
-  poe.ninja/poe2/profile URL, "my character", "my build", "how tanky am I",
-  "what's my DPS", "export to PoB".
+  Analyse and improve Path of Exile 2 builds with the `poe2` CLI, which runs
+  the real Path of Building engine. Use when the user asks about a PoE2
+  character or build (DPS, defences, EHP, max hit, skills), whether an item is
+  an upgrade, which passives to take next, which mods to look for on a slot,
+  or about PoE2 mods, gems and uniques. Triggers: a poe.ninja/poe2 URL, a PoB
+  build code or pobb.in link, pasted item text, "my character", "my build",
+  "is this an upgrade", "what should I craft", "which passive next".
 ---
 
 # poe2: PoE2 build analysis
 
-`poe2` fetches a character from a public poe.ninja profile and calculates it
-with Path of Building (PoB-PoE2) running headless inside the binary. Its
-numbers match what PoB and poe.ninja show. Never estimate stats yourself when
-`poe2` can calculate them.
+`poe2` calculates builds with Path of Building (PoB-PoE2) running headless
+inside the binary, and answers game-data questions from PoB's data. Its numbers
+match PoB and poe.ninja. Never estimate stats or state mod, gem or unique facts
+from memory when `poe2` can calculate or look them up.
+
+## Naming a build
+
+Every build command takes a BUILD, which can be:
+
+- a poe.ninja profile URL, `https://poe.ninja/poe2/profile/<account>/<league>/character/<name>`
+- `account/character`, such as `Name#1234/Koftespies` (quote it in the shell)
+- a link to a build site PoB imports from: pobb.in, poe.ninja/poe2/pob, Maxroll, poe2db, pastebin
+- a file with a build code or PoB XML, `-` for stdin, or a raw build code
+
+`poe2 chars 'Name#1234'` lists an account's public characters. If the user
+names a character but not the account, ask for it.
 
 ## Commands
 
-```sh
-poe2 char stats <url>          # readable summary: DPS, defences, res, EHP, max hit
-poe2 char stats <url> --json   # every PoB output stat (about 700) plus mainSkill
-poe2 char export <url>         # PoB build code, for the PoB GUI's "Import from code"
-```
-
-`<url>` is `https://poe.ninja/poe2/profile/<account>/<league>/character/<name>`.
-The account uses `-` where the in-game name has `#` (`Name#1234` is
-`Name-1234`). If the user gives only an account and character name, ask for
-the league or the poe.ninja URL rather than guessing.
-
-Each call takes about 3 seconds. The very first call downloads PoB (about
-390 MB) and takes longer; tell the user when that happens.
-
-## Reading the JSON
-
-Start with the summary. Reach for `--json` when a question needs a stat the
-summary leaves out, and pull only what you need with `jq` instead of reading
-all 700 keys:
-
-```sh
-poe2 char stats <url> --json | jq '.stats | {Life, EnergyShield, TotalEHP, FireResistOverCap}'
-poe2 char stats <url> --json | jq '.stats | with_entries(select(.key | test("MaximumHitTaken")))'
-```
-
-Useful keys, all under `.stats`:
-
-| Topic | Keys |
+| Question | Command |
 |---|---|
-| Damage | `CombinedDPS`, `TotalDPS`, `AverageDamage`, `Speed`, `CritChance`, `CritMultiplier`, `HitChance` |
-| Pools | `Life`, `EnergyShield`, `Mana`, `Spirit`, `SpiritUnreserved`, `LifeUnreserved` |
-| Mitigation | `Armour`, `Evasion`, `AverageEvadeChance`, `DeflectChance`, `BlockChance` |
-| Resistances | `FireResist`, `ColdResist`, `LightningResist`, `ChaosResist`, plus `...OverCap` for each |
-| Survivability | `TotalEHP`, `PhysicalMaximumHitTaken` and the same for each element and chaos, `StunThreshold` |
-| Recovery | `LifeRegenRecovery`, `EnergyShieldRegenRecovery`, `ManaRegenRecovery` |
+| What are my stats? | `poe2 stats BUILD` (PoB's sidebar) |
+| Which skills do damage? | `poe2 skills BUILD` |
+| Is this item an upgrade? | `poe2 whatif BUILD --item - [--slot "Ring 1"]` with the item text on stdin |
+| What if I (un)allocate a passive? | `poe2 whatif BUILD --allocate NAME --unallocate NAME` (repeatable, names or node ids) |
+| Which passives next? | `poe2 tree BUILD [--by balanced\|dps\|ehp] [--distance 4] [--limit 15]` |
+| What should I craft or buy for a slot? | `poe2 upgrades BUILD --slot Boots [--by ...]` |
+| PoB code for the GUI | `poe2 export BUILD` |
+| Mods, gems, uniques | `poe2 mods "movement speed" [--base "Silk Slippers"]`, `poe2 gems NAME`, `poe2 uniques NAME` |
 
-## Things to keep in mind
+Every command takes `--json`. Build commands take a few seconds each; the very
+first run downloads PoB (about 390 MB), so tell the user when that happens.
 
-- **Stats reflect the build as poe.ninja last saw it**, with the PoB
-  configuration stored in its export (enemy settings, buffs, charges). If the
-  user says they changed gear recently, the profile may not be refreshed yet.
-- **Some PoB keys are PoE1 leftovers** that are always 0 in PoE2, such as
-  `SpellSuppressionChance` or the `Dodge` keys. Do not present them as weaknesses.
-- **DPS is for the main skill only** (`mainSkill`), the one selected in the
-  export. Say which skill a DPS figure belongs to.
-- For anything `poe2` cannot calculate yet, such as what-if gear swaps, say so
-  and suggest the user check in the PoB GUI with `poe2 char export`.
+Slots are named `Weapon 1`, `Weapon 2`, `Helmet`, `Body Armour`, `Gloves`,
+`Boots`, `Amulet`, `Ring 1`, `Ring 2`, `Belt`, `Charm 1` to `3`, `Flask 1`
+and `2`.
+
+### Items
+
+Items are compared with the text the game copies with Ctrl+C (in game or on
+the trade site). Pass it through a heredoc so nothing needs escaping:
+
+```sh
+poe2 whatif 'Name#1234/Char' --item - <<'EOF'
+Item Class: Boots
+Rarity: Rare
+...
+EOF
+```
+
+Without `--slot`, the item is compared in every slot it fits (both rings, for
+example).
+
+## Reading the results
+
+- `whatif` lists only stats that change, PoB-formatted, with `[better]` or
+  `[worse]`. Summarise the trade-off; do not just repeat the list.
+- `tree` totals include the path to each passive, and ranks per point spent.
+  `balanced` adds DPS % and EHP %. Passives can share a name; use the node id
+  from the output with `whatif --allocate` to check a specific one.
+- `upgrades` adds the best tier of each mod the slot's item can roll, at a
+  middle roll, and shows the item's free prefixes and suffixes (recognised from
+  its mod text). Mods marked "needs a free slot" mean replacing a mod, so check
+  with `whatif` against the item as it would be.
+- `skills` calculates each skill as if it were the main skill. DPS in `stats`,
+  `whatif`, `tree` and `upgrades` is for the main skill only; say so.
+- With `--json`, extract what you need with `jq` rather than reading it all:
+  `poe2 stats BUILD --json | jq '.stats | {Life, EnergyShield, TotalEHP}'`.
+
+## Caveats
+
+- Numbers use the PoB configuration saved with the build (enemy type, buffs,
+  charges, flask uptime). poe.ninja builds use poe.ninja's defaults.
+- poe.ninja only refreshes a character every so often. If the user just
+  changed gear, the numbers may be behind.
+- Some PoB keys are PoE1 leftovers that are always 0 in PoE2, such as
+  `SpellSuppressionChance`. Do not present them as weaknesses.

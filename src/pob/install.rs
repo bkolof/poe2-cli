@@ -42,7 +42,8 @@ pub fn ensure_installed() -> Result<PathBuf> {
 }
 
 fn release_dir() -> Result<PathBuf> {
-    let data = dirs::data_local_dir().context("cannot determine the user's local data directory")?;
+    let data =
+        dirs::data_local_dir().context("cannot determine the user's local data directory")?;
     let dir = data.join("poe2").join("pob").join(VERSION);
     fs::create_dir_all(dir.parent().expect("release dir has a parent"))?;
     Ok(dir)

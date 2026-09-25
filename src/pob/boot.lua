@@ -25,20 +25,3 @@ end
 
 dofile("HeadlessWrapper.lua")
 
--- The calculated output of the loaded build. Non-finite numbers are dropped
--- because JSON cannot represent them.
-function poe2.result()
-	local stats = {}
-
-	for key, value in pairs(build.calcsTab.mainOutput) do
-		local kind = type(value)
-		local finite = kind == "number" and value == value and math.abs(value) ~= math.huge
-
-		if finite or kind == "string" or kind == "boolean" then
-			stats[key] = value
-		end
-	end
-
-	local mainGroup = build.skillsTab.socketGroupList[build.mainSocketGroup]
-	return { mainSkill = mainGroup and mainGroup.displayLabel, stats = stats }
-end

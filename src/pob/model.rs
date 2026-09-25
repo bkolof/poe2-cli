@@ -1,0 +1,168 @@
+//! What the Lua API in `api.lua` returns, field for field.
+
+use serde::{Deserialize, Serialize};
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct BuildInfo {
+    pub class: String,
+    pub ascendancy: Option<String>,
+    pub level: u32,
+    pub main_skill: Option<String>,
+}
+
+/// A row of PoB's sidebar. A row without a label is a section break.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SidebarRow {
+    pub label: Option<String>,
+    pub value: Option<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SkillDps {
+    pub name: String,
+    pub group: Option<String>,
+    pub slot: Option<String>,
+    pub main: bool,
+    pub combined_dps: f64,
+    pub hit_dps: f64,
+    pub dot_dps: f64,
+    pub minion_dps: f64,
+    pub average_hit: f64,
+    pub speed: f64,
+}
+
+#[derive(Debug, Default, Serialize)]
+pub struct WhatIfRequest {
+    /// Item text as copied in game with Ctrl+C.
+    pub item: Option<String>,
+    /// Only compare the item in this slot, instead of every slot it fits.
+    pub slot: Option<String>,
+    pub allocate: Vec<String>,
+    pub unallocate: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct WhatIf {
+    pub item: Option<String>,
+    /// Passive points allocated (paths included) and unallocated (dependents included).
+    pub points: PassivePoints,
+    pub results: Vec<WhatIfResult>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct PassivePoints {
+    pub added: u32,
+    pub removed: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct WhatIfResult {
+    pub slot: Option<String>,
+    pub replacing: Option<String>,
+    #[serde(default)]
+    pub changes: Vec<StatChange>,
+}
+
+/// A stat that changed, formatted the way PoB shows it.
+#[derive(Debug, Deserialize, Serialize)]
+pub struct StatChange {
+    pub stat: String,
+    pub label: String,
+    pub before: String,
+    pub after: String,
+    pub diff: String,
+    pub percent: Option<f64>,
+    pub better: bool,
+}
+
+/// How a change moves the headline numbers.
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct Impact {
+    /// Passive points the change costs.
+    pub points: u32,
+    pub dps_percent: f64,
+    pub ehp_percent: f64,
+    pub life: f64,
+    pub energy_shield: f64,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct TreeSuggestion {
+    /// The node id, which `whatif --allocate` accepts when names are shared.
+    pub id: u32,
+    pub name: String,
+    pub kind: String,
+    #[serde(default)]
+    pub stats: Vec<String>,
+    #[serde(flatten)]
+    pub impact: Impact,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct SlotUpgrades {
+    pub slot: String,
+    pub item: String,
+    pub item_level: u32,
+    /// Corrupted items cannot be modified further.
+    pub corrupted: bool,
+    /// Open affixes on a rare, recognised from the item's mod text.
+    pub free_prefixes: u32,
+    pub free_suffixes: u32,
+    #[serde(default)]
+    pub upgrades: Vec<ModUpgrade>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ModUpgrade {
+    #[serde(rename = "mod")]
+    pub text: String,
+    pub affix: String,
+    pub level: u32,
+    /// Whether the item has a free affix of this kind.
+    pub fits: bool,
+    #[serde(flatten)]
+    pub impact: Impact,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ModInfo {
+    pub id: String,
+    pub kind: String,
+    pub affix: Option<String>,
+    pub name: Option<String>,
+    pub group: Option<String>,
+    pub level: Option<u32>,
+    pub lines: Vec<String>,
+    #[serde(default)]
+    pub tags: Vec<String>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct GemInfo {
+    pub name: String,
+    pub kind: Option<String>,
+    pub tags: Option<String>,
+    pub support: bool,
+    pub description: Option<String>,
+    pub requirements: Requirements,
+    pub max_level: Option<u32>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct Requirements {
+    pub str: u32,
+    pub dex: u32,
+    pub int: u32,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct UniqueInfo {
+    pub name: String,
+    pub kind: String,
+    pub text: String,
+}

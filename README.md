@@ -1,10 +1,10 @@
 # poe2
 
-Path of Exile 2 build analysis on the command line. Characters come from public
-poe.ninja profiles; every stat is calculated by
+Path of Exile 2 build analysis on the command line. Every stat is calculated by
 [Path of Building](https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2)
-itself, running headless inside this binary on an embedded LuaJIT. No stat is
-calculated in this repo.
+itself, running headless inside this binary on an embedded LuaJIT, and game
+data (mods, gems, uniques) comes from PoB's data. No stat is calculated and no
+game data is kept in this repo.
 
 ## Setup
 
@@ -34,20 +34,36 @@ unpacked) into `poe2/pob/<version>` under the local data directory:
 
 ## Usage
 
+A BUILD is a poe.ninja profile URL, `account/character` (`'Name#1234/Char'`),
+a link to a build site PoB imports from (pobb.in, Maxroll, ...), a file with a
+build code or PoB XML, `-` for stdin, or a build code.
+
 ```sh
-poe2 char stats https://poe.ninja/poe2/profile/<account>/<league>/character/<name>
-poe2 char stats <url> --json     # every PoB output stat
-poe2 char export <url>           # build code for the PoB GUI's "Import from code"
+poe2 stats BUILD                          # PoB's sidebar
+poe2 skills BUILD                         # DPS of every active skill
+poe2 whatif BUILD --item item.txt         # item text copied with Ctrl+C; `-` reads stdin
+poe2 whatif BUILD --allocate "Imbibed Power" --unallocate "For the Jugular"
+poe2 tree BUILD --by balanced|dps|ehp     # best passives within reach, per point
+poe2 upgrades BUILD --slot Boots          # best mods to add to a slot's item
+poe2 export BUILD                         # build code for PoB's "Import from code"
+poe2 chars 'Name#1234'                    # an account's public characters
+poe2 mods "movement speed" --base "Silk Slippers"
+poe2 gems "falling thunder"
+poe2 uniques "atziri"
 ```
+
+Every command takes `--json`.
 
 ## How it works
 
-1. `ninja.rs` fetches the character model from poe.ninja's profile API. It
-   includes a PoB build code.
-2. `pob/code.rs` decodes the build code to build XML.
-3. `pob/mod.rs` boots PoB through its own `HeadlessWrapper.lua`
-   (`pob/boot.lua`), loads the build, and reads PoB's calculated output
-   straight from its Lua tables.
+1. `source.rs` turns the BUILD argument into PoB build XML, fetching from
+   poe.ninja (`ninja.rs`) or a build site where needed. Build site links are
+   resolved with PoB's own list of sites.
+2. `pob/mod.rs` boots PoB through its `HeadlessWrapper.lua` (`pob/boot.lua`)
+   and loads `pob/api.lua`, which holds one Lua function per feature.
+3. Those functions use PoB's own machinery: the calculator behind its item and
+   passive tooltips for every comparison, its sidebar for stats, and its data
+   tables for searches. `report.rs` formats the results for people.
 
 The PoB version is pinned in `pob/install.rs`. To move to a new PoB release,
 bump `VERSION` and run the tests: `tests/pob.rs` checks that headless PoB
