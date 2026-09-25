@@ -5,9 +5,11 @@ description: >-
   the real Path of Building engine. Use when the user asks about a PoE2
   character or build (DPS, defences, EHP, max hit, skills), whether an item is
   an upgrade, which passives to take next, which mods to look for on a slot,
-  or about PoE2 mods, gems and uniques. Triggers: a poe.ninja/poe2 URL, a PoB
-  build code or pobb.in link, pasted item text, "my character", "my build",
-  "is this an upgrade", "what should I craft", "which passive next".
+  or about PoE2 mods, gems and uniques, or wants to buy upgrades on the trade
+  site or know prices. Triggers: a poe.ninja/poe2 URL, a PoB build code or
+  pobb.in link, pasted item text, "my character", "my build", "is this an
+  upgrade", "what should I craft", "which passive next", "find me boots",
+  "best upgrade for my budget", "what is a divine worth".
 ---
 
 # poe2: PoE2 build analysis
@@ -39,6 +41,9 @@ names a character but not the account, ask for it.
 | What if I (un)allocate a passive? | `poe2 whatif BUILD --allocate NAME --unallocate NAME` (repeatable, names or node ids) |
 | Which passives next? | `poe2 tree BUILD [--by balanced\|dps\|ehp] [--distance 4] [--limit 15]` |
 | What should I craft or buy for a slot? | `poe2 upgrades BUILD --slot Boots [--by ...]` |
+| Which uniques are worth buying? | `poe2 uniques-for BUILD --slot Boots [--budget 2]` |
+| Find the best items to buy | `poe2 trade search BUILD --slot Boots --budget 5 [--require "movement speed=25"] [--open]` |
+| Currency prices | `poe2 prices` |
 | PoB code for the GUI | `poe2 export BUILD` |
 | Mods, gems, uniques | `poe2 mods "movement speed" [--base "Silk Slippers"]`, `poe2 gems NAME`, `poe2 uniques NAME` |
 
@@ -48,6 +53,44 @@ first run downloads PoB (about 390 MB), so tell the user when that happens.
 Slots are named `Weapon 1`, `Weapon 2`, `Helmet`, `Body Armour`, `Gloves`,
 `Boots`, `Amulet`, `Ring 1`, `Ring 2`, `Belt`, `Charm 1` to `3`, `Flask 1`
 and `2`.
+
+### Buying
+
+Budgets are in divines unless marked: `5`, `5div`, `300ex`, `20c`. Prices come
+from poe.ninja, for the character's league.
+
+- `uniques-for` needs no login: it calculates every unique that fits the slot
+  and joins poe.ninja prices. Try it before a trade search for slots where
+  uniques are common.
+- `trade search` lets PoB weight a trade site search by what each stat is
+  worth to the build, fetches the best matches (`--fetch`, default 30) and
+  calculates every one with PoB. It lists the best value at each price: each
+  step up in price is a real improvement. Items the character lacks the
+  attributes for are left out of that list.
+- PoB only weighs stats that change DPS or EHP. For stats a player still
+  wants, such as movement speed on boots, add `--require "movement speed=25"`
+  (a text to find the trade site stat by, then a minimum). Ask the user about
+  this for boots.
+- `--open` opens the search on the trade site in the user's browser, where
+  they can buy or whisper. Results also carry the whisper message.
+- Searches count against the trade site's rate limits; `poe2` waits when
+  needed. Do not loop over many searches: one slot at a time.
+
+### Trade login
+
+Weighted searches need the user's pathofexile.com session, the POESESSID
+cookie. It is as sensitive as a password: never print it, never put it on a
+command line, never keep it in the conversation.
+
+- `poe2 trade status` says whether a session is stored and still works.
+- The user can run `poe2 trade login` in their own terminal and paste the
+  cookie (browser developer tools, Storage or Application, Cookies,
+  pathofexile.com). The prompt hides it.
+- Or, with the Playwright browser tools: open https://www.pathofexile.com/login
+  in a visible browser, let the user log in, then run code in the browser
+  context that reads the POESESSID cookie from `page.context().cookies()` and
+  passes it on stdin to `poe2 trade login` through `child_process`, returning
+  only whether the login succeeded. Never return or log the cookie value.
 
 ### Items
 

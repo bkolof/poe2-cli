@@ -3,7 +3,7 @@
 use anyhow::{Context, Result};
 use poe2::market::{self, Price, Rates};
 use poe2::ninja::Character;
-use poe2::pob::model::UniqueCandidate;
+use poe2::pob::model::{Listing, UniqueCandidate};
 use serde::Serialize;
 
 use crate::Rank;
@@ -72,4 +72,108 @@ pub fn rank_uniques(
     priced
         .sort_by(|a, b| score(&b.candidate.impact, by).total_cmp(&score(&a.candidate.impact, by)));
     priced
+}
+
+#[derive(Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct PricedListing {
+    #[serde(flatten)]
+    pub listing: Listing,
+    /// The asking price in divines, when poe.ninja knows the currency.
+    pub divines: Option<f64>,
+    pub score: f64,
+    /// No other listing is both at least as good and cheaper.
+    pub best_value: bool,
+}
+
+/// Price the listings and mark the best value ones: going up in price, each
+/// must beat every cheaper listing. Listings the character cannot wear, and
+/// ones that do not improve the build, are never best value.
+pub fn rank_listings(listings: Vec<Listing>, rates: &Rates, by: Rank) -> Vec<PricedListing> {
+    let mut priced: Vec<PricedListing> = listings
+        .into_iter()
+        .map(|listing| PricedListing {
+            divines: match (listing.amount, &listing.currency) {
+                (Some(amount), Some(currency)) => rates.to_divines(amount, currency),
+                _ => None,
+            },
+            score: score(&listing.impact, by),
+            best_value: false,
+            listing,
+        })
+        .collect();
+
+    priced.sort_by(|a, b| {
+        let price = |p: &PricedListing| p.divines.unwrap_or(f64::INFINITY);
+        price(a)
+            .total_cmp(&price(b))
+            .then(b.score.total_cmp(&a.score))
+    });
+    let mut best_so_far = 0.0;
+
+    for listing in &mut priced {
+        let eligible = listing.divines.is_some() && listing.listing.meets_requirements;
+
+        if eligible && listing.score > best_so_far {
+            listing.best_value = true;
+            best_so_far = listing.score;
+        }
+    }
+
+    priced
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+    use poe2::market::Currency;
+    use poe2::pob::model::Impact;
+
+    fn listing(id: &str, exalted: f64, dps_percent: f64, meets_requirements: bool) -> Listing {
+        Listing {
+            id: id.into(),
+            name: id.into(),
+            amount: Some(exalted),
+            currency: Some("exalted".into()),
+            seller: None,
+            whisper: None,
+            item_text: String::new(),
+            meets_requirements,
+            impact: Impact {
+                points: 1,
+                dps_percent,
+                ehp_percent: 0.0,
+                life: 0.0,
+                energy_shield: 0.0,
+            },
+        }
+    }
+
+    #[test]
+    fn marks_the_best_value_at_each_price() {
+        let rates = Rates {
+            league: "Test".into(),
+            currencies: vec![Currency {
+                id: "exalted".into(),
+                name: "Exalted Orb".into(),
+                divines: 0.01,
+            }],
+        };
+        let listings = vec![
+            listing("cheap", 10.0, 2.0, true),
+            listing("worse and dearer", 20.0, 1.0, true),
+            listing("better", 50.0, 5.0, true),
+            listing("unwearable", 5.0, 9.0, false),
+            listing("downgrade", 1.0, -3.0, true),
+        ];
+
+        let ranked = rank_listings(listings, &rates, Rank::Dps);
+
+        let best: Vec<&str> = ranked
+            .iter()
+            .filter(|l| l.best_value)
+            .map(|l| l.listing.id.as_str())
+            .collect();
+        assert_eq!(best, ["cheap", "better"]);
+    }
 }

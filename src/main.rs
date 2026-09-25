@@ -2,15 +2,16 @@ mod report;
 mod shop;
 
 use std::fs;
-use std::io::{self, Read};
+use std::io::{self, IsTerminal, Read};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
 use poe2::market::{self, Price};
 use poe2::ninja;
-use poe2::pob::model::WhatIfRequest;
+use poe2::pob::model::{StatRequirement, TradeQueryRequest, WhatIfRequest};
 use poe2::pob::{self, Pob};
 use poe2::source::{LoadedBuild, Source};
+use poe2::trade::{self, session};
 use serde::Serialize;
 
 /// Path of Exile 2 build analysis, backed by headless Path of Building.
@@ -126,6 +127,9 @@ enum Command {
         #[arg(long)]
         league: Option<String>,
     },
+    /// Trade site searches for the best items for a build (needs `trade login`)
+    #[command(subcommand)]
+    Trade(TradeCommand),
     /// Currency exchange rates from poe.ninja
     Prices {
         /// The league (default: the current challenge league)
@@ -134,6 +138,58 @@ enum Command {
         #[arg(long, default_value_t = 20)]
         limit: usize,
     },
+}
+
+#[derive(Subcommand)]
+enum TradeCommand {
+    /// Store your pathofexile.com session (the POESESSID cookie), read from stdin
+    Login,
+    /// Check whether the stored session still works
+    Status,
+    /// Delete the stored session
+    Logout,
+    /// Find the best value items for a slot: PoB weights the search, then
+    /// calculates every listing it fetches
+    Search {
+        /// The build: a poe.ninja URL, account/character, build site link, file, `-` or build code
+        build: String,
+        /// The item slot, e.g. "Boots", "Ring 1", "Weapon 1"
+        #[arg(long)]
+        slot: String,
+        /// The most to spend: `5` (divines), `5div`, `300ex` or `20c`
+        #[arg(long)]
+        budget: Option<Price>,
+        /// What to optimise for
+        #[arg(long, value_enum, default_value_t = Rank::Balanced)]
+        by: Rank,
+        /// A stat the item must have, as `text=minimum`, e.g. "movement speed=25" (repeatable)
+        #[arg(long)]
+        require: Vec<String>,
+        /// Which listings to include
+        #[arg(long, value_enum, default_value_t = Status::Available)]
+        status: Status,
+        /// How many of the best matching listings to calculate with PoB
+        #[arg(long, default_value_t = 30)]
+        fetch: usize,
+        /// Open the search on the trade site
+        #[arg(long)]
+        open: bool,
+        /// The league (default: the character's, or the current league)
+        #[arg(long)]
+        league: Option<String>,
+    },
+}
+
+#[derive(Clone, Copy, ValueEnum)]
+enum Status {
+    /// Instant buyout only
+    Securable,
+    /// Instant buyout, or a seller who is online
+    Available,
+    /// Sellers who are online
+    Online,
+    /// Every listing
+    Any,
 }
 
 #[derive(Clone, Copy, ValueEnum)]
@@ -333,6 +389,7 @@ fn main() -> Result<()> {
 
             report::uniques_for(&slot.slot, &league, &uniques, &rates, by);
         }
+        Command::Trade(command) => trade_command(command, json)?,
         Command::Prices { league, limit } => {
             let league = league.map_or_else(market::current_league, Ok)?;
             let rates = market::currency_rates(&league)?;
@@ -346,6 +403,144 @@ fn main() -> Result<()> {
     }
 
     Ok(())
+}
+
+fn trade_command(command: TradeCommand, json: bool) -> Result<()> {
+    match command {
+        TradeCommand::Login => {
+            let input = if io::stdin().is_terminal() {
+                rpassword::prompt_password("Paste your POESESSID cookie: ")?
+            } else {
+                read_input("-")?
+            };
+            let value = session::normalise(&input)?;
+
+            if !trade::Client::with_session(Some(value.clone())).session_valid()? {
+                anyhow::bail!(
+                    "pathofexile.com did not accept this session; log in again and copy a fresh POESESSID"
+                );
+            }
+
+            session::save(&value)?;
+            println!("Logged in. The session is stored for trade searches.");
+        }
+        TradeCommand::Status => {
+            let client = trade::Client::new()?;
+
+            if !client.has_session() {
+                println!("Not logged in: run `poe2 trade login`.");
+            } else if client.session_valid()? {
+                println!("Logged in; the session works.");
+            } else {
+                println!("The stored session expired: run `poe2 trade login`.");
+            }
+        }
+        TradeCommand::Logout => {
+            if session::delete()? {
+                println!("Deleted the stored session.");
+            } else {
+                println!("No session was stored.");
+            }
+        }
+        TradeCommand::Search {
+            build,
+            slot,
+            budget,
+            by,
+            require,
+            status,
+            fetch,
+            open,
+            league,
+        } => {
+            let require = require
+                .iter()
+                .map(|r| parse_requirement(r))
+                .collect::<Result<Vec<_>>>()?;
+            let (pob, loaded) = self::open(&build)?;
+            let league = shop::league(league, loaded.character.as_ref())?;
+            let rates = market::currency_rates(&league)?;
+            let budget = shop::budget_in_divines(budget.as_ref(), &rates)?;
+            let exalted = rates
+                .divines("exalted")
+                .context("poe.ninja has no exalted orb rate")?;
+            let query = pob.trade_query(&TradeQueryRequest {
+                slot,
+                by: rank_id(by).into(),
+                status: status_id(status).into(),
+                // Without a budget, a very high cap still leaves out unpriced listings.
+                max_exalted: budget.map_or(1e7, |divines| divines / exalted),
+                require,
+            })?;
+
+            let client = trade::Client::new()?;
+            let body: serde_json::Value = serde_json::from_str(&query.query)?;
+            let search = client.search(&league, &body).map_err(|error| {
+                if client.has_session() {
+                    error
+                } else {
+                    error.context("weighted searches need a session: run `poe2 trade login`")
+                }
+            })?;
+            let ids: Vec<String> = search.result.iter().take(fetch).cloned().collect();
+            let bodies = client.fetch(&search.id, &ids)?;
+            let listings =
+                shop::rank_listings(pob.evaluate_listings(&query.slot, &bodies)?, &rates, by);
+            let url = trade::search_url(&league, &search.id);
+
+            if open {
+                open::that(&url).with_context(|| format!("cannot open {url}"))?;
+            }
+
+            if json {
+                return print_json(&serde_json::json!({
+                    "league": league,
+                    "slot": query.slot,
+                    "url": url,
+                    "total": search.total,
+                    "weights": query.weights,
+                    "required": query.required,
+                    "listings": listings,
+                }));
+            }
+
+            report::trade_search(&query, &league, search.total, &listings, &rates, &url, by);
+        }
+    }
+
+    Ok(())
+}
+
+/// `movement speed=25` into a stat to look up and its minimum.
+fn parse_requirement(text: &str) -> Result<StatRequirement> {
+    let (stat, min) = text
+        .rsplit_once('=')
+        .with_context(|| format!("'{text}' is not `stat text=minimum`"))?;
+    let min = min
+        .trim()
+        .parse()
+        .with_context(|| format!("'{min}' is not a number"))?;
+    Ok(StatRequirement {
+        stat: stat.trim().to_string(),
+        min,
+    })
+}
+
+fn rank_id(rank: Rank) -> &'static str {
+    match rank {
+        Rank::Balanced => "balanced",
+        Rank::Dps => "dps",
+        Rank::Ehp => "ehp",
+    }
+}
+
+fn status_id(status: Status) -> &'static str {
+    match status {
+        Status::Securable => "securable",
+        Status::Available => "available",
+        Status::Online => "online",
+        Status::Any => "any",
+    }
 }
 
 /// Read the build source, start PoB and load the build into it.

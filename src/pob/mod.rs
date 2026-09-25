@@ -17,8 +17,8 @@ use serde::de::DeserializeOwned;
 pub use code::{decode_build_code, encode_build_code};
 pub use install::{VERSION, ensure_installed, installed_dir};
 use model::{
-    BuildInfo, GemInfo, ModInfo, SidebarRow, SkillDps, SlotUniques, SlotUpgrades, TreeSuggestion,
-    UniqueInfo, WhatIf, WhatIfRequest,
+    BuildInfo, GemInfo, Listing, ModInfo, SidebarRow, SkillDps, SlotUniques, SlotUpgrades,
+    TradeQuery, TradeQueryRequest, TreeSuggestion, UniqueInfo, WhatIf, WhatIfRequest,
 };
 
 unsafe extern "C-unwind" {
@@ -98,6 +98,16 @@ impl Pob {
 
     pub fn uniques_for_slot(&self, slot: &str) -> Result<SlotUniques> {
         self.call("uniquesForSlot", slot)
+    }
+
+    pub fn trade_query(&self, request: &TradeQueryRequest) -> Result<TradeQuery> {
+        let request = self.lua.to_value(request)?;
+        self.call("tradeQuery", request)
+    }
+
+    /// Calculate trade listings (fetch response bodies) in a slot.
+    pub fn evaluate_listings(&self, slot: &str, bodies: &[String]) -> Result<Vec<Listing>> {
+        self.call("evaluateListings", (slot, bodies.to_vec()))
     }
 
     pub fn search_mods(&self, query: &str, base: Option<&str>) -> Result<Vec<ModInfo>> {

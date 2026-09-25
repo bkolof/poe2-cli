@@ -7,8 +7,9 @@ use poe2::pob::model::{
 };
 
 use crate::Rank;
-use crate::shop::PricedUnique;
+use crate::shop::{PricedListing, PricedUnique};
 use poe2::market::Rates;
+use poe2::pob::model::TradeQuery;
 
 pub fn header(info: &BuildInfo, character: Option<&Character>) {
     let class = info.ascendancy.as_deref().unwrap_or(&info.class);
@@ -354,6 +355,67 @@ pub fn uniques_for(slot: &str, league: &str, uniques: &[PricedUnique], rates: &R
             c.base
         );
     }
+}
+
+pub fn trade_search(
+    query: &TradeQuery,
+    league: &str,
+    total: Option<u64>,
+    listings: &[PricedListing],
+    rates: &Rates,
+    url: &str,
+    by: Rank,
+) {
+    println!(
+        "{} in {league}: PoB weighted {} stats",
+        query.slot,
+        query.weights.len()
+    );
+
+    for requirement in &query.required {
+        println!("  requires {} >= {}", requirement.text, requirement.min);
+    }
+
+    println!(
+        "{} listings match; calculated the best {} with PoB, ranked by {}.\n",
+        total.map_or("Some".into(), |t| t.to_string()),
+        listings.len(),
+        rank_name(by)
+    );
+
+    let best: Vec<&PricedListing> = listings.iter().filter(|l| l.best_value).collect();
+
+    if best.is_empty() {
+        println!("No listing improves the build.");
+    } else {
+        println!("Best value at each price:\n");
+    }
+
+    for listing in &best {
+        let l = &listing.listing;
+        let price = listing.divines.map_or("?".into(), |d| rates.format(d));
+        println!(
+            "{price:>9}  {:>6.1}  {}  {}",
+            listing.score,
+            impact_columns(&l.impact),
+            l.name
+        );
+
+        if let Some(whisper) = &l.whisper {
+            println!("{:>19}{whisper}", "");
+        }
+    }
+
+    let unwearable = listings
+        .iter()
+        .filter(|l| !l.listing.meets_requirements)
+        .count();
+
+    if unwearable > 0 {
+        println!("\n{unwearable} more would need higher attributes than the build has.");
+    }
+
+    println!("\nTrade site: {url}");
 }
 
 pub fn prices(rates: &Rates, limit: usize) {

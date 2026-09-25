@@ -45,6 +45,10 @@ poe2 whatif BUILD --item item.txt         # item text copied with Ctrl+C; `-` re
 poe2 whatif BUILD --allocate "Imbibed Power" --unallocate "For the Jugular"
 poe2 tree BUILD --by balanced|dps|ehp     # best passives within reach, per point
 poe2 upgrades BUILD --slot Boots          # best mods to add to a slot's item
+poe2 uniques-for BUILD --slot Boots --budget 2   # uniques that help, priced by poe.ninja
+poe2 trade login                          # store your POESESSID (read from stdin)
+poe2 trade search BUILD --slot Boots --budget 5 --require "movement speed=25" --open
+poe2 prices                               # currency rates from poe.ninja
 poe2 export BUILD                         # build code for PoB's "Import from code"
 poe2 chars 'Name#1234'                    # an account's public characters
 poe2 mods "movement speed" --base "Silk Slippers"
@@ -52,7 +56,16 @@ poe2 gems "falling thunder"
 poe2 uniques "atziri"
 ```
 
-Every command takes `--json`.
+Every command takes `--json`. Budgets are in divines unless marked: `5`,
+`5div`, `300ex`, `20c`.
+
+`trade search` lets PoB generate a weighted trade site search (its own trade
+query generator, weighting each stat by what it is worth to the build),
+fetches the best matches and calculates every one with PoB, then lists the
+best value at each price. Weighted searches need a logged-in session; the
+POESESSID is stored in the config directory, readable only by you. Requests
+stay within the trade site's rate limits, which are tracked on disk across
+runs.
 
 ## How it works
 
