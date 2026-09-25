@@ -179,8 +179,7 @@ mod tests {
 
     #[test]
     fn parses_profile_url() {
-        let url =
-            "https://poe.ninja/poe2/profile/Exile-1234/forbiddenrites/character/Koftespies";
+        let url = "https://poe.ninja/poe2/profile/Exile-1234/forbiddenrites/character/Koftespies";
 
         assert_eq!(
             parse_profile_url(url).unwrap(),
