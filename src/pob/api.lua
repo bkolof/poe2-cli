@@ -333,29 +333,80 @@ function poe2.whatIf(request)
 	end
 
 	local itemsTab = build.itemsTab
-	local weaponSet = itemsTab.activeItemSet.useSecondWeaponSet and 2 or 1
+	local itemSet = itemsTab.activeItemSet
 	itemsTab:UpdateSockets()
-	local results = {}
+
+	-- A jewel socket holds a jewel only when it is, or is being, allocated.
+	if request.slot then
+		local name, slot = findSlot(request.slot)
+		local allocating = override.addNodes and override.addNodes[build.spec.nodes[slot.nodeId]]
+
+		if slot.nodeId and slot.inactive and not allocating then
+			error(name .. " is not allocated; add --allocate " .. slot.nodeId, 0)
+		end
+	end
+
+	local activeSet = itemSet.useSecondWeaponSet and 2 or 1
+	local slots = { [1] = {}, [2] = {} }
+	local modDB = build.calcsTab.mainEnv.modDB
+	-- As PoB's calculation counts them; it only reports the count in breakdowns.
+	local charmLimit = math.min(modDB:Override(nil, "CharmLimit") or modDB:Sum("BASE", nil, "CharmLimit"), 3)
 
 	for slotName, slot in pairs(itemsTab.slots) do
 		local wanted = not request.slot or slotName:lower() == request.slot:lower()
-		local active = not slot.inactive and (not slot.weaponSet or slot.weaponSet == weaponSet) and slot.shown()
+		-- A jewel socket being allocated in the same comparison can take a jewel.
+		local allocating = slot.nodeId and override.addNodes and override.addNodes[build.spec.nodes[slot.nodeId]]
+		-- Weapon slots are shown for the active set only; both sets are compared.
+		local active = allocating or not slot.inactive and (slot.weaponSet ~= nil or slot.shown())
+		-- PoB's calculation ignores charms beyond the belt's charm slots.
+		local charm = tonumber(slotName:match("^Charm (%d)$"))
+		local usable = not charm or charm <= charmLimit
 
-		if wanted and active and itemsTab:IsItemValidForSlot(item, slotName) then
-			local current = itemsTab.items[slot.selItemId]
+		if wanted and active and usable and itemsTab:IsItemValidForSlot(item, slotName) then
+			table.insert(slots[slot.weaponSet or activeSet], slotName)
+		end
+	end
+
+	local results = {}
+
+	local function compareIn(slotNames, calc, base)
+		for _, slotName in ipairs(slotNames) do
+			local current = itemsTab.items[itemsTab.slots[slotName].selItemId]
 			override.repSlotName = slotName
 			override.repItem = item
 
 			table.insert(results, {
 				slot = slotName,
 				replacing = current and current.name,
-				changes = compare(baseOutput, calcFunc(override)),
+				changes = compare(base, calc(override)),
 			})
 		end
 	end
 
+	compareIn(slots[activeSet], calcFunc, baseOutput)
+	local otherSet = 3 - activeSet
+
+	-- The other weapon set is compared with it active, as when swapping to it:
+	-- when asked for, or when it has a weapon.
+	local otherWeapon = itemsTab.slots[otherSet == 2 and "Weapon 1 Swap" or "Weapon 1"].selItemId or 0
+	local useOther = request.slot or otherWeapon ~= 0
+
+	if useOther and #slots[otherSet] > 0 then
+		itemSet.useSecondWeaponSet = otherSet == 2
+		recalculate()
+		local ok, err = pcall(function()
+			compareIn(slots[otherSet], build.calcsTab:GetMiscCalculator())
+		end)
+		itemSet.useSecondWeaponSet = activeSet == 2
+		recalculate()
+
+		if not ok then
+			error(err, 0)
+		end
+	end
+
 	if #results == 0 then
-		error("the item fits no active slot" .. (request.slot and (" named '" .. request.slot .. "'") or ""), 0)
+		error("the item fits no usable slot" .. (request.slot and (" named '" .. request.slot .. "'") or ""), 0)
 	end
 
 	table.sort(results, function(a, b) return a.slot < b.slot end)

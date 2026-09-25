@@ -9,6 +9,24 @@ use poe2::pob::{self, Pob};
 
 const BUILD_CODE: &str = include_str!("fixtures/koftespies.pob");
 
+const CHARM: &str = "Item Class: Charms
+Rarity: Magic
+Thawing Charm of the Lizard
+Grants Immunity to Freeze";
+
+const STAFF: &str = "Item Class: Quarterstaves
+Rarity: Rare
+Armageddon Mast
+Sinister Quarterstaff
+Adds 88 to 140 Fire Damage
+23% increased Attack Speed";
+
+const JEWEL: &str = "Item Class: Jewels
+Rarity: Rare
+Empyrean Essence
+Emerald
+10% increased Attack Speed with Quarterstaves";
+
 fn installed() -> Option<PathBuf> {
     let dir = pob::installed_dir();
 
@@ -131,6 +149,50 @@ fn analyses_a_build() {
             .unwrap_err()
             .to_string()
             .contains("belongs to the Titan ascendancy")
+    );
+
+    let item_slots = |item: &str, slot: Option<&str>, allocate: &[&str]| {
+        pob.what_if(&WhatIfRequest {
+            item: Some(item.into()),
+            slot: slot.map(Into::into),
+            allocate: allocate.iter().map(|a| a.to_string()).collect(),
+            ..Default::default()
+        })
+        .map(|w| {
+            w.results
+                .into_iter()
+                .filter_map(|r| r.slot)
+                .collect::<Vec<_>>()
+        })
+    };
+
+    // The belt has one charm slot and a quest grants another.
+    assert_eq!(
+        item_slots(CHARM, None, &[]).unwrap(),
+        ["Charm 1", "Charm 2"]
+    );
+
+    // The swap set is empty, so it is compared only when asked for, and the
+    // build keeps its active set afterwards.
+    let dps = || pob.output().unwrap()["TotalDPS"].as_f64().unwrap();
+    let before = dps();
+    assert_eq!(item_slots(STAFF, None, &[]).unwrap(), ["Weapon 1"]);
+    assert_eq!(
+        item_slots(STAFF, Some("Weapon 1 Swap"), &[]).unwrap(),
+        ["Weapon 1 Swap"]
+    );
+    assert_eq!(dps(), before);
+
+    // A jewel goes into a socket allocated in the same comparison.
+    assert_eq!(
+        item_slots(JEWEL, Some("Jewel 21984"), &["21984"]).unwrap(),
+        ["Jewel 21984"]
+    );
+    assert_eq!(
+        item_slots(JEWEL, Some("Jewel 21984"), &[])
+            .unwrap_err()
+            .to_string(),
+        "Jewel 21984 is not allocated; add --allocate 21984"
     );
 
     let suggestions = pob.tree_suggestions(2).unwrap();
