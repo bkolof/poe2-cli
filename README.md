@@ -52,6 +52,8 @@ poe2 trade search BUILD --slot Boots --name "Atziri's Step"    # a unique, calcu
 poe2 trade search BUILD --slot jewel --jewel-type radius       # jewels for a socket
 poe2 trade scan BUILD --budget 5          # the best upgrade in every gear slot
 poe2 trade stats "fire resistance"        # trade site stats, for --require and friends
+poe2 price --item item.txt                # price check an item, like Sidekick
+poe2 price BUILD                          # price every equipped item
 poe2 prices                               # currency rates from poe.ninja
 poe2 export BUILD                         # build code for PoB's "Import from code"
 poe2 chars 'Name#1234'                    # an account's public characters
@@ -75,6 +77,10 @@ a sum or a stat (`--sort`), and merge in raw query JSON (`--query`);
 search for a unique or an item base instead of PoB's weights, and jewel
 sockets (`--slot jewel`) are searched for base or radius jewels. `trade scan` runs one
 weighted search per gear slot and ranks the upgrades side by side.
+
+`price` checks what an item is worth: a unique by name, anything else by its
+mods within a tolerance, requiring fewer of them until enough listings match,
+and estimates from the median of the cheapest listings. It needs no login.
 
 Weighted searches need a logged-in session; the
 POESESSID is stored in the config directory, readable only by you. Requests

@@ -47,6 +47,8 @@ names a character but not the account, ask for it.
 | Find a jewel | `poe2 trade search BUILD --slot jewel [--jewel-type radius]` |
 | Best upgrade in every slot | `poe2 trade scan BUILD --budget 5 [--slot Boots --slot Gloves]` |
 | Find a trade site stat | `poe2 trade stats "fire resistance"` |
+| What is this item worth? | `poe2 price --item -` with the item text on stdin |
+| What is my gear worth? | `poe2 price BUILD` |
 | Currency prices | `poe2 prices` |
 | PoB code for the GUI | `poe2 export BUILD` |
 | Mods, gems, uniques | `poe2 mods "movement speed" [--base "Silk Slippers"]`, `poe2 gems NAME`, `poe2 uniques NAME` |
@@ -117,6 +119,24 @@ repeatable; a stat is a text to find it by or a trade id from `trade stats`):
 - The site limits how costly a search is, and extra weighted sums cost the
   most. When it refuses a search, `poe2` retries with fewer of PoB's least
   important weights and says how many it left out.
+
+### Price checks
+
+`poe2 price` works like Sidekick's price check, without adjusting filters by
+hand, and needs no login. A unique is searched by name, with poe.ninja's price
+shown too. Anything else is searched by its category, its defences and its
+mods, each within `--tolerance` percent of the item's value (default 10). When
+fewer than 10 listings have every mod, it searches again for listings with
+any N of them, one fewer each time, down to half. The estimate is the median of
+the cheapest 10 listings, so a single fake cheap listing does not set it.
+
+- Say how many mods the listings had to match; an estimate from a relaxed
+  search, or from few listings, is rough.
+- Rune lines are left out, as runes can be swapped. Mods the trade site has no
+  stat for are listed as not searchable.
+- `poe2 price BUILD` prices every equipped item, one to four searches each,
+  and takes a minute or two within the rate limits. Items nobody lists (some
+  quest bases) show `?`.
 
 ### Trade login
 

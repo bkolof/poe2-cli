@@ -10,6 +10,7 @@ use crate::Rank;
 use crate::shop::{PricedListing, PricedUnique, SlotSearch};
 use poe2::market::Rates;
 use poe2::pob::model::TradeStat;
+use poe2::trade::price::{ENOUGH_LISTINGS, Offer, PriceCheck};
 
 pub fn header(info: &BuildInfo, character: Option<&Character>) {
     let class = info.ascendancy.as_deref().unwrap_or(&info.class);
@@ -517,6 +518,152 @@ pub fn trade_stats(stats: &[TradeStat], limit: usize) {
 
     if stats.len() > limit {
         println!("... and {} more", stats.len() - limit);
+    }
+}
+
+pub fn price_checks(checks: &[PriceCheck], league: &str, rates: &Rates) {
+    match checks {
+        [check] => price_check(check, league, rates),
+        _ => price_summary(checks, league, rates),
+    }
+}
+
+fn price_check(check: &PriceCheck, league: &str, rates: &Rates) {
+    let item = &check.item;
+    println!(
+        "{}, {} ({}) in {league}",
+        item.name,
+        item.base,
+        item.rarity.to_lowercase()
+    );
+    let within = format!("{}%", (check.tolerance * 100.0).round());
+
+    if item.unique {
+        println!("Searched by name{}.", corrupted(item.corrupted));
+    } else if item.mods.is_empty() {
+        println!(
+            "Searched by category and defences{}.",
+            corrupted(item.corrupted)
+        );
+    } else if check.required == item.mods.len() {
+        println!(
+            "Searched for all {} mods, each within {within} of its value{}:",
+            item.mods.len(),
+            corrupted(item.corrupted)
+        );
+    } else {
+        println!(
+            "Too few listings had every mod, so searched for any {} of these {}, each within {within} of its value{}:",
+            check.required,
+            item.mods.len(),
+            corrupted(item.corrupted)
+        );
+    }
+
+    for m in &item.mods {
+        println!("  {}", m.text);
+    }
+
+    for (id, value) in &item.defences {
+        println!(
+            "  {id} at least {}",
+            (value * (1.0 - check.tolerance)).floor()
+        );
+    }
+
+    if !item.unsearchable.is_empty() {
+        println!("Not on the trade site: {}", item.unsearchable.join(", "));
+    }
+
+    let total = check.total.map_or("Some".into(), |t| t.to_string());
+
+    if check.offers.is_empty() {
+        println!("\n{total} listings match.");
+    } else {
+        println!("\n{total} listings match. The cheapest:\n");
+    }
+
+    for offer in &check.offers {
+        println!(
+            "{:>10}  {}{}",
+            offer_price(offer, rates),
+            offer.name,
+            offer.indexed.as_deref().map_or(String::new(), |i| format!(
+                ", listed {}",
+                i.split('T').next().unwrap_or(i)
+            ))
+        );
+    }
+
+    println!();
+
+    match check.estimate {
+        Some(estimate) => println!(
+            "Estimate: about {}, the median of the cheapest {}.",
+            rates.format(estimate),
+            check
+                .offers
+                .iter()
+                .filter(|o| o.divines.is_some())
+                .count()
+                .min(ENOUGH_LISTINGS as usize)
+        ),
+        None => println!("No priced listings to estimate from."),
+    }
+
+    if let Some(ninja) = check.ninja {
+        println!("poe.ninja: {}.", rates.format(ninja));
+    }
+
+    if check.total.unwrap_or(0) < ENOUGH_LISTINGS {
+        println!("Few listings match, so the estimate is rough.");
+    }
+
+    println!("\nTrade site: {}", check.url);
+}
+
+fn price_summary(checks: &[PriceCheck], league: &str, rates: &Rates) {
+    println!("Equipped items priced on the trade site in {league}:\n");
+    println!("{:<14}{:>10}  {:>8}  Item", "Slot", "Estimate", "Listings");
+
+    for check in checks {
+        let item = &check.item;
+        let estimate = check.estimate.map_or("?".into(), |e| rates.format(e));
+        let matched = if !item.unique && check.required < item.mods.len() {
+            format!(" ({} of {} mods)", check.required, item.mods.len())
+        } else {
+            String::new()
+        };
+        println!(
+            "{:<14}{estimate:>10}  {:>8}  {}, {}{matched}",
+            item.slot,
+            check.total.map_or("?".into(), |t| t.to_string()),
+            item.name,
+            item.base
+        );
+    }
+
+    let total: f64 = checks.iter().filter_map(|c| c.estimate).sum();
+    let unpriced = checks.iter().filter(|c| c.estimate.is_none()).count();
+    println!("\nTotal: about {}", rates.format(total));
+
+    match unpriced {
+        0 => {}
+        1 => println!("1 item had no priced listings and is left out."),
+        n => println!("{n} items had no priced listings and are left out."),
+    }
+
+    println!("Items with few listings, or with some mods left out, have rough estimates.");
+}
+
+fn corrupted(corrupted: bool) -> &'static str {
+    if corrupted { ", corrupted" } else { "" }
+}
+
+fn offer_price(offer: &Offer, rates: &Rates) -> String {
+    match offer.divines {
+        Some(divines) => rates.format(divines),
+        None => format!("{} {}", offer.amount, offer.currency),
     }
 }
 

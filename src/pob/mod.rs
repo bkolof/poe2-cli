@@ -17,9 +17,9 @@ use serde::de::DeserializeOwned;
 pub use code::{decode_build_code, encode_build_code};
 pub use install::{VERSION, ensure_installed, installed_dir};
 use model::{
-    BuildInfo, GemInfo, Listing, ModInfo, SidebarRow, SkillDps, SlotUniques, SlotUpgrades,
-    TradeQuery, TradeQueryRequest, TradeStat, TreeSuggestion, UniqueBase, UniqueInfo, WhatIf,
-    WhatIfRequest,
+    BuildInfo, GemInfo, Listing, ModInfo, PriceItem, SidebarRow, SkillDps, SlotUniques,
+    SlotUpgrades, TradeQuery, TradeQueryRequest, TradeStat, TreeSuggestion, UniqueBase, UniqueInfo,
+    WhatIf, WhatIfRequest,
 };
 
 unsafe extern "C-unwind" {
@@ -115,6 +115,16 @@ impl Pob {
     /// A unique by its exact name, with its base.
     pub fn find_unique(&self, name: &str) -> Result<UniqueBase> {
         self.call("findUnique", name)
+    }
+
+    /// A pasted item, described for a price check.
+    pub fn price_item(&self, text: &str) -> Result<PriceItem> {
+        self.call("priceItem", text)
+    }
+
+    /// Every item the loaded build has equipped, described for price checks.
+    pub fn equipped_for_price(&self) -> Result<Vec<PriceItem>> {
+        self.call("equippedForPrice", ())
     }
 
     /// Trade site stats matching a text or id, best match first.

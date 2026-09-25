@@ -195,6 +195,23 @@ fn analyses_a_build() {
         "Jewel 21984 is not allocated; add --allocate 21984"
     );
 
+    // Price checks search equipped items by their mods' trade stats, and
+    // leave out the runes socketed in them.
+    let equipped = pob.equipped_for_price().unwrap();
+    let belt = equipped.iter().find(|i| i.slot == "Belt").unwrap();
+    assert_eq!(belt.category.as_deref(), Some("accessory.belt"));
+    assert!(belt.mods.iter().any(|m| m.text == "+171 to maximum Life"));
+    let helmet = equipped.iter().find(|i| i.slot == "Helmet").unwrap();
+    assert!(!helmet.mods.iter().any(|m| m.text.contains("Bonded")));
+    assert!(equipped.iter().any(|i| i.slot == "Jewel 32763"));
+    assert!(!equipped.iter().any(|i| i.slot.contains("Swap")));
+
+    let unique = pob
+        .price_item("Rarity: Unique\nAtziri's Step\nCinched Boots\n30% increased Movement Speed")
+        .unwrap();
+    assert!(unique.unique && unique.mods.is_empty());
+    assert_eq!(unique.slot, "Boots");
+
     let suggestions = pob.tree_suggestions(2).unwrap();
     assert!(suggestions.iter().any(|s| s.impact.dps_percent > 0.0));
     assert!(suggestions.iter().all(|s| s.impact.points <= 2));

@@ -893,6 +893,122 @@ function poe2.tradeQuery(request)
 	return { slot = name, query = generated.json, weights = weightList }
 end
 
+-- Price checks ----------------------------------------------------------------
+
+local buySimilar = LoadModule("Classes/CompareBuySimilar")
+
+-- The slot whose trade category an item is searched in.
+local function priceSlot(item)
+	local itemType = item.type
+
+	if itemType == "Ring" then
+		return "Ring 1"
+	elseif itemType == "Jewel" then
+		return item.base.subType == "Charm" and "Charm 1" or "Jewel"
+	elseif itemType == "Charm" then
+		return "Charm 1"
+	elseif itemType == "Flask" then
+		return item.base.subType == "Mana" and "Flask 2" or "Flask 1"
+	end
+
+	for _, slotName in ipairs({ "Body Armour", "Helmet", "Gloves", "Boots", "Amulet", "Belt" }) do
+		if itemType == slotName then
+			return slotName
+		end
+	end
+
+	return "Weapon 1"
+end
+
+-- What a price check searches for: a unique by name, or an item's category,
+-- defences and mods, matched to trade stats the way PoB's "Buy similar" does.
+local function describeForPrice(item, slotName)
+	local unique = item.rarity == "UNIQUE" or item.rarity == "RELIC"
+	local mods, unsearchable, defences = {}, {}, {}
+
+	if not unique then
+		local entries = buySimilar.addModEntries(item, {
+			{ list = item.enchantModLines, type = "enchant" },
+			{ list = item.implicitModLines, type = "implicit" },
+			{ list = item.explicitModLines, type = "explicit" },
+		})
+
+		for _, entry in ipairs(entries) do
+			local lines = {}
+
+			for _, line in ipairs(entry.formattedLines) do
+				table.insert(lines, stripColors(line))
+			end
+
+			local text = table.concat(lines, ", ")
+
+			if #entry.tradeIds == 0 then
+				table.insert(unsearchable, text)
+			else
+				table.insert(mods, {
+					text = text,
+					ids = entry.tradeIds,
+					value = entry.value,
+					invert = entry.invert or false,
+					option = entry.isOption,
+				})
+			end
+		end
+
+		for key, id in pairs({ Armour = "ar", Evasion = "ev", EnergyShield = "es" }) do
+			local value = item.armourData and item.armourData[key]
+
+			if value and value > 0 then
+				defences[id] = value
+			end
+		end
+	end
+
+	return {
+		slot = slotName,
+		name = item.title or item.name,
+		base = item.baseName,
+		rarity = item.rarity,
+		unique = unique,
+		category = (tradeHelpers.getTradeCategory(slotName, item)),
+		corrupted = item.corrupted or false,
+		mods = mods,
+		unsearchable = unsearchable,
+		defences = defences,
+	}
+end
+
+-- A pasted item, described for a price check.
+function poe2.priceItem(text)
+	local item = new("Item", text)
+
+	if not item.base then
+		error("PoB does not recognise this item; paste the full text copied in game with Ctrl+C", 0)
+	end
+
+	return describeForPrice(item, priceSlot(item))
+end
+
+-- Every item the build has equipped, described for price checks.
+function poe2.equippedForPrice()
+	local itemsTab = build.itemsTab
+	itemsTab:UpdateSockets()
+	local items = {}
+
+	for _, slot in ipairs(itemsTab.orderedSlots) do
+		local item = itemsTab.items[slot.selItemId]
+		-- Sockets in items (Abyss-style) are priced with the item holding them.
+		local inItem = slot.slotName:find("Jewel Socket") ~= nil
+		local active = not slot.inactive and (slot.nodeId ~= nil or slot.shown())
+
+		if item and item.base and active and not inItem then
+			table.insert(items, describeForPrice(item, slot.slotName))
+		end
+	end
+
+	return items
+end
+
 -- Trade listings (the fetch responses' JSON) converted to items the way PoB's
 -- own trade window does it, and calculated in a slot.
 function poe2.evaluateListings(slotName, bodies)

@@ -11,6 +11,7 @@ use poe2::ninja::{self, Character};
 use poe2::pob::model::{TradeQueryRequest, WhatIfRequest};
 use poe2::pob::{self, Pob};
 use poe2::source::{LoadedBuild, Source};
+use poe2::trade::price;
 use poe2::trade::query::{self, Additions, Count, Filter, Require, Search, Sort, Sum};
 use poe2::trade::{self, session};
 use serde::Serialize;
@@ -134,6 +135,35 @@ enum Command {
     /// Trade site searches for the best items for a build (needs `trade login`)
     #[command(subcommand)]
     Trade(TradeCommand),
+    /// Price check an item on the trade site, or every item a build has equipped
+    ///
+    /// Searches listings like the item (a unique by name; anything else by its
+    /// mods at a tolerance, requiring fewer of them until enough listings match)
+    /// and estimates the price from the cheapest. Needs no login.
+    Price {
+        /// The build whose equipped items to price: a poe.ninja URL, account/character,
+        /// build site link, file, `-` or build code
+        #[arg(required_unless_present = "item", conflicts_with = "item")]
+        build: Option<String>,
+        /// Item text as copied in game with Ctrl+C: a file, or `-` for stdin
+        #[arg(long)]
+        item: Option<String>,
+        /// How far below the item's values a listing's mods may be, in percent
+        #[arg(long, default_value_t = 10.0)]
+        tolerance: f64,
+        /// Which listings to include
+        #[arg(long, value_enum, default_value_t = Status::Available)]
+        status: Status,
+        /// How many of the cheapest listings to fetch per item
+        #[arg(long, default_value_t = 10)]
+        fetch: usize,
+        /// The league (default: the character's, or the current league)
+        #[arg(long)]
+        league: Option<String>,
+        /// Open the search on the trade site (with --item)
+        #[arg(long, requires = "item")]
+        open: bool,
+    },
     /// Currency exchange rates from poe.ninja
     Prices {
         /// The league (default: the current challenge league)
@@ -492,6 +522,69 @@ fn main() -> Result<()> {
             report::uniques_for(&slot.slot, &league, &uniques, &rates, by);
         }
         Command::Trade(command) => trade_command(command, json)?,
+        Command::Price {
+            build,
+            item,
+            tolerance,
+            status,
+            fetch,
+            league,
+            open,
+        } => {
+            let (character, items) = match (build, item) {
+                (Some(build), _) => {
+                    let (pob, loaded) = self::open(&build)?;
+                    (loaded.character, pob.equipped_for_price()?)
+                }
+                (None, Some(path)) => {
+                    // Read before PoB starts, which changes the working directory.
+                    let text = read_input(&path)?;
+                    let pob = Pob::start(&pob::ensure_installed()?)?;
+                    (None, vec![pob.price_item(&text)?])
+                }
+                (None, None) => unreachable!("clap requires a build or --item"),
+            };
+            let league = shop::league(league, character.as_ref())?;
+            let rates = market::currency_rates(&league)?;
+            let uniques = if items.iter().any(|i| i.unique) {
+                market::unique_prices(&league)?
+            } else {
+                Vec::new()
+            };
+            let client = trade::Client::new()?;
+            let mut checks = Vec::new();
+
+            for item in items {
+                let mut check = price::check(
+                    &client,
+                    &league,
+                    &rates,
+                    item,
+                    status_id(status),
+                    tolerance / 100.0,
+                    fetch,
+                )?;
+
+                if check.item.unique {
+                    check.ninja =
+                        market::unique_price(&uniques, &check.item.name, &check.item.base)
+                            .map(|p| p.divines);
+                }
+
+                checks.push(check);
+            }
+
+            if open {
+                open::that(&checks[0].url)
+                    .with_context(|| format!("cannot open {}", checks[0].url))?;
+            }
+
+            if json {
+                return print_json(&serde_json::json!({ "league": league, "items": checks }));
+            }
+
+            report::price_checks(&checks, &league, &rates);
+        }
         Command::Prices { league, limit } => {
             let league = league.map_or_else(market::current_league, Ok)?;
             let rates = market::currency_rates(&league)?;

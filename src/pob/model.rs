@@ -1,5 +1,7 @@
 //! What the Lua API in `api.lua` returns, field for field.
 
+use std::collections::BTreeMap;
+
 use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Deserialize, Serialize)]
@@ -240,6 +242,41 @@ pub struct TradeWeight {
     pub id: String,
     pub text: Option<String>,
     pub weight: f64,
+}
+
+/// An item as a price check searches for it.
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PriceItem {
+    /// The slot it is equipped in, or whose trade category it belongs to.
+    pub slot: String,
+    pub name: String,
+    pub base: String,
+    pub rarity: String,
+    pub unique: bool,
+    /// The trade site category, e.g. "armour.boots".
+    pub category: Option<String>,
+    pub corrupted: bool,
+    /// Mods matched to trade stats; none for uniques, which are searched by name.
+    #[serde(default)]
+    pub mods: Vec<PriceMod>,
+    /// Mods with no trade stat.
+    #[serde(default)]
+    pub unsearchable: Vec<String>,
+    /// Armour ("ar"), evasion ("ev") and energy shield ("es").
+    #[serde(default)]
+    pub defences: BTreeMap<String, f64>,
+}
+
+#[derive(Debug, Clone, Deserialize, Serialize)]
+pub struct PriceMod {
+    pub text: String,
+    /// More than one when the text matches several trade stats.
+    pub ids: Vec<String>,
+    pub value: Option<f64>,
+    /// The trade site counts the stat the other way round (reduced for increased).
+    pub invert: bool,
+    /// An option stat, matched exactly.
+    pub option: bool,
 }
 
 /// A trade site stat, e.g. `pseudo.pseudo_increased_movement_speed`.

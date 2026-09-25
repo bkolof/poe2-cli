@@ -2,6 +2,7 @@
 //! within the site's rate limits, with the user's session when there is one.
 
 pub mod limits;
+pub mod price;
 pub mod query;
 pub mod session;
 
