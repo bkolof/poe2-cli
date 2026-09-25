@@ -17,8 +17,8 @@ use serde::de::DeserializeOwned;
 pub use code::{decode_build_code, encode_build_code};
 pub use install::{VERSION, ensure_installed, installed_dir};
 use model::{
-    BuildInfo, GemInfo, ModInfo, SidebarRow, SkillDps, SlotUpgrades, TreeSuggestion, UniqueInfo,
-    WhatIf, WhatIfRequest,
+    BuildInfo, GemInfo, ModInfo, SidebarRow, SkillDps, SlotUniques, SlotUpgrades, TreeSuggestion,
+    UniqueInfo, WhatIf, WhatIfRequest,
 };
 
 unsafe extern "C-unwind" {
@@ -94,6 +94,10 @@ impl Pob {
 
     pub fn slot_upgrades(&self, slot: &str) -> Result<SlotUpgrades> {
         self.call("slotUpgrades", slot)
+    }
+
+    pub fn uniques_for_slot(&self, slot: &str) -> Result<SlotUniques> {
+        self.call("uniquesForSlot", slot)
     }
 
     pub fn search_mods(&self, query: &str, base: Option<&str>) -> Result<Vec<ModInfo>> {

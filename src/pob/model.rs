@@ -185,3 +185,20 @@ pub struct UniqueInfo {
     pub kind: String,
     pub text: String,
 }
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct SlotUniques {
+    pub slot: String,
+    #[serde(default)]
+    pub candidates: Vec<UniqueCandidate>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct UniqueCandidate {
+    pub name: String,
+    pub base: String,
+    pub level_required: u32,
+    #[serde(flatten)]
+    pub impact: Impact,
+}

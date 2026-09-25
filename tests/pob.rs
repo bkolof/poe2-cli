@@ -139,6 +139,15 @@ fn analyses_a_build() {
 
     // The boots have movement speed, life and stun threshold, cold resistance
     // and freeze duration: two prefixes and three suffixes.
+    let uniques = pob.uniques_for_slot("Boots").unwrap();
+    let step = uniques
+        .candidates
+        .iter()
+        .find(|c| c.name == "Atziri's Step")
+        .expect("Atziri's Step fits the boots slot");
+    assert_eq!(step.base, "Cinched Boots");
+    assert!(uniques.candidates.iter().all(|c| !c.base.contains("Ring")));
+
     let boots = pob.slot_upgrades("boots").unwrap();
     assert_eq!((boots.free_prefixes, boots.free_suffixes), (1, 0));
     assert!(

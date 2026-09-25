@@ -514,6 +514,30 @@ function poe2.slotUpgrades(slotName)
 	}
 end
 
+-- The impact of equipping each unique that fits a slot, in its current
+-- version and with middle rolls, in place of what the slot holds now.
+function poe2.uniquesForSlot(slotName)
+	local name = findSlot(slotName)
+	local calcFunc, baseOutput = build.calcsTab:GetMiscCalculator()
+	local candidates = {}
+
+	for _, list in pairs(data.uniques) do
+		for _, raw in ipairs(list) do
+			local item = new("Item", raw)
+
+			if item.base and build.itemsTab:IsItemValidForSlot(item, name) then
+				local result = impact(baseOutput, calcFunc({ repSlotName = name, repItem = item }), 1)
+				result.name = item.title
+				result.base = item.baseName
+				result.levelRequired = item.requirements.level or 0
+				table.insert(candidates, result)
+			end
+		end
+	end
+
+	return { slot = name, candidates = candidates }
+end
+
 local function contains(text, query)
 	return text and text:lower():find(query:lower(), 1, true) ~= nil
 end

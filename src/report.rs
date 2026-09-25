@@ -7,6 +7,8 @@ use poe2::pob::model::{
 };
 
 use crate::Rank;
+use crate::shop::PricedUnique;
+use poe2::market::Rates;
 
 pub fn header(info: &BuildInfo, character: Option<&Character>) {
     let class = info.ascendancy.as_deref().unwrap_or(&info.class);
@@ -316,6 +318,56 @@ pub fn uniques(uniques: &[UniqueInfo], limit: usize) {
     if uniques.len() > limit {
         let rest: Vec<&str> = uniques[limit..].iter().map(|u| u.name.as_str()).collect();
         println!("\n{} more: {}", rest.len(), rest.join(", "));
+    }
+}
+
+pub fn uniques_for(slot: &str, league: &str, uniques: &[PricedUnique], rates: &Rates, by: Rank) {
+    println!(
+        "Uniques for {slot}, ranked by {}, priced by poe.ninja in {league}:\n",
+        rank_name(by)
+    );
+
+    if uniques.is_empty() {
+        println!("No unique improves the build within the budget.");
+        return;
+    }
+
+    for unique in uniques {
+        let c = &unique.candidate;
+        let price = match (unique.divines, unique.listings) {
+            (Some(divines), Some(listings)) => {
+                format!("{} ({listings} listed)", rates.format(divines))
+            }
+            _ => "no price".into(),
+        };
+        let level = if unique.equippable {
+            String::new()
+        } else {
+            format!(", needs level {}", c.level_required)
+        };
+        println!(
+            "{:>6.1}  {}  {:<24}{} ({}{level})",
+            score(&c.impact, by),
+            impact_columns(&c.impact),
+            price,
+            c.name,
+            c.base
+        );
+    }
+}
+
+pub fn prices(rates: &Rates, limit: usize) {
+    println!("Currency in {}, from poe.ninja:\n", rates.league);
+    let exalted = rates.divines("exalted");
+
+    for currency in rates.currencies.iter().take(limit) {
+        let in_exalted = exalted
+            .map(|e| format!("{:>12.2} ex", currency.divines / e))
+            .unwrap_or_default();
+        println!(
+            "{:<32}{:>12.4} div{in_exalted}",
+            currency.name, currency.divines
+        );
     }
 }
 

@@ -1,10 +1,12 @@
 mod report;
+mod shop;
 
 use std::fs;
 use std::io::{self, Read};
 
 use anyhow::{Context, Result};
 use clap::{Parser, Subcommand, ValueEnum};
+use poe2::market::{self, Price};
 use poe2::ninja;
 use poe2::pob::model::WhatIfRequest;
 use poe2::pob::{self, Pob};
@@ -103,6 +105,33 @@ enum Command {
     Uniques {
         query: String,
         #[arg(long, default_value_t = 10)]
+        limit: usize,
+    },
+    /// The uniques that would improve a slot, with poe.ninja prices
+    UniquesFor {
+        /// The build: a poe.ninja URL, account/character, build site link, file, `-` or build code
+        build: String,
+        /// The item slot, e.g. "Boots", "Ring 1", "Weapon 1"
+        #[arg(long)]
+        slot: String,
+        /// The most to spend: `5` (divines), `5div`, `300ex` or `20c`
+        #[arg(long)]
+        budget: Option<Price>,
+        /// What to rank by
+        #[arg(long, value_enum, default_value_t = Rank::Balanced)]
+        by: Rank,
+        #[arg(long, default_value_t = 15)]
+        limit: usize,
+        /// The league to price in (default: the character's, or the current league)
+        #[arg(long)]
+        league: Option<String>,
+    },
+    /// Currency exchange rates from poe.ninja
+    Prices {
+        /// The league (default: the current challenge league)
+        #[arg(long)]
+        league: Option<String>,
+        #[arg(long, default_value_t = 20)]
         limit: usize,
     },
 }
@@ -279,6 +308,40 @@ fn main() -> Result<()> {
             }
 
             report::uniques(&uniques, limit);
+        }
+        Command::UniquesFor {
+            build,
+            slot,
+            budget,
+            by,
+            limit,
+            league,
+        } => {
+            let (pob, loaded) = open(&build)?;
+            let league = shop::league(league, loaded.character.as_ref())?;
+            let rates = market::currency_rates(&league)?;
+            let budget = shop::budget_in_divines(budget.as_ref(), &rates)?;
+            let level = pob.info()?.level;
+            let slot = pob.uniques_for_slot(&slot)?;
+            let prices = market::unique_prices(&league)?;
+            let mut uniques = shop::rank_uniques(slot.candidates, &prices, budget, level, by);
+            uniques.truncate(limit);
+
+            if json {
+                return print_json(&uniques);
+            }
+
+            report::uniques_for(&slot.slot, &league, &uniques, &rates, by);
+        }
+        Command::Prices { league, limit } => {
+            let league = league.map_or_else(market::current_league, Ok)?;
+            let rates = market::currency_rates(&league)?;
+
+            if json {
+                return print_json(&rates);
+            }
+
+            report::prices(&rates, limit);
         }
     }
 
