@@ -6,31 +6,53 @@ itself, running headless inside this binary on an embedded LuaJIT, and game
 data (mods, gems, uniques) comes from PoB's data. No stat is calculated and no
 game data is kept in this repo.
 
-## Setup
+## Install
 
-The Rust toolchain is pinned in `mise.toml`, and building also needs a C
-compiler for LuaJIT and lua-utf8.
-
-```sh
-mise install
-cargo build --release
-```
-
-To put `poe2` on PATH and give Claude Code the skill in `skills/poe2`:
+**macOS and Linux:**
 
 ```sh
-cargo install --path . --root ~/.local                  # ~/.local/bin/poe2
-ln -sfn "$PWD/skills/poe2" ~/.claude/skills/poe2
+curl --proto '=https' --tlsv1.2 -LsSf https://github.com/bkolof/poe2-cli/releases/latest/download/poe2-installer.sh | sh
 ```
 
-The symlink keeps the skill versioned with the CLI, and edits take effect
-without reinstalling. `~/.claude/skills` is not an exact directory in chezmoi,
-so chezmoi leaves the link alone.
+**Windows** (PowerShell):
 
-The first calculation downloads the pinned PoB release (about 390 MB, 65 MB
-unpacked) into `poe2/pob/<version>` under the local data directory:
-`~/.local/share` on Linux, `~/Library/Application Support` on macOS,
-`%LOCALAPPDATA%` on Windows.
+```powershell
+powershell -ExecutionPolicy Bypass -c "irm https://github.com/bkolof/poe2-cli/releases/latest/download/poe2-installer.ps1 | iex"
+```
+
+The installers put `poe2` in `~/.cargo/bin` (`%USERPROFILE%\.cargo\bin` on
+Windows) and add it to PATH; open a new terminal afterwards. The binaries are
+also on the [releases page](https://github.com/bkolof/poe2-cli/releases).
+
+The binaries are not code-signed. The installers avoid the warnings, but a
+binary downloaded in a browser is blocked the first time: on macOS run
+`xattr -d com.apple.quarantine poe2` once, and on Windows choose "More info",
+then "Run anyway".
+
+The first calculation downloads the pinned Path of Building release (about
+390 MB, 65 MB unpacked) into `poe2/pob/<version>` under the local data
+directory: `~/.local/share` on Linux, `~/Library/Application Support` on
+macOS, `%LOCALAPPDATA%` on Windows.
+
+### Claude Code
+
+The `poe2` skill teaches Claude Code to use the CLI. Install it as a plugin:
+
+```
+/plugin marketplace add bkolof/poe2-cli
+/plugin install poe2@poe2-cli
+```
+
+Then ask Claude about your character, for example "what should I upgrade on
+`Name#1234/MyCharacter` for 2 divines?".
+
+### Trade site login
+
+Weighted trade searches need your pathofexile.com session: run
+`poe2 trade login` and paste the `POESESSID` cookie (browser developer tools,
+Storage or Application, Cookies, pathofexile.com). It is stored in a file only
+you can read, and never printed. Price checks and plain searches work without
+it.
 
 ## Usage
 
@@ -103,6 +125,29 @@ The PoB version is pinned in `pob/install.rs`. To move to a new PoB release,
 bump `VERSION` and run the tests: `tests/pob.rs` checks that headless PoB
 reproduces the stats poe.ninja stored in a real build. It skips itself when
 the pinned PoB is not installed yet.
+
+## Development
+
+The Rust toolchain and `dist` are pinned in `mise.toml`, and building also
+needs a C compiler for LuaJIT and lua-utf8.
+
+```sh
+mise install
+cargo build --release
+cargo test        # the PoB tests run once `poe2` has downloaded PoB
+```
+
+To use a local build and edit the skill in place:
+
+```sh
+cargo install --path . --root ~/.local                  # ~/.local/bin/poe2
+ln -sfn "$PWD/skills/poe2" ~/.claude/skills/poe2
+```
+
+Releases are built by GitHub Actions with
+[dist](https://github.com/axodotdev/cargo-dist): bump the version in
+`Cargo.toml` and `.claude-plugin/plugin.json`, commit, and push a tag such as
+`v0.3.0`. CI runs the tests on Linux, macOS and Windows on every push.
 
 ## Vendored code
 

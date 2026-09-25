@@ -19,6 +19,14 @@ inside the binary, and answers game-data questions from PoB's data. Its numbers
 match PoB and poe.ninja. Never estimate stats or state mod, gem or unique facts
 from memory when `poe2` can calculate or look them up.
 
+If `poe2` is not installed (`poe2 --version` fails), tell the user how to
+install it and wait for them; installing runs code from the internet, so it is
+their call. On macOS and Linux:
+`curl --proto '=https' --tlsv1.2 -LsSf https://github.com/bkolof/poe2-cli/releases/latest/download/poe2-installer.sh | sh`.
+On Windows, in PowerShell:
+`powershell -ExecutionPolicy Bypass -c "irm https://github.com/bkolof/poe2-cli/releases/latest/download/poe2-installer.ps1 | iex"`.
+A new terminal picks up the PATH change.
+
 ## Naming a build
 
 Every build command takes a BUILD, which can be:

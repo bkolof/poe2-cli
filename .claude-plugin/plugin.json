@@ -1,0 +1,8 @@
+{
+  "name": "poe2",
+  "version": "0.3.0",
+  "description": "Analyse and improve Path of Exile 2 builds, buy upgrades and price items with the poe2 CLI, which runs the real Path of Building engine.",
+  "author": { "name": "Björn Kolof" },
+  "repository": "https://github.com/bkolof/poe2-cli",
+  "license": "MIT"
+}

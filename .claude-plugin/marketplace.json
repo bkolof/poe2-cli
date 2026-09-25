@@ -1,0 +1,14 @@
+{
+  "name": "poe2-cli",
+  "owner": {
+    "name": "Björn Kolof"
+  },
+  "description": "The poe2 skill for Claude Code: Path of Exile 2 builds, trade and prices, powered by Path of Building.",
+  "plugins": [
+    {
+      "name": "poe2",
+      "source": "./",
+      "description": "Path of Exile 2 build analysis, upgrades, trade searches and price checks with the poe2 CLI."
+    }
+  ]
+}

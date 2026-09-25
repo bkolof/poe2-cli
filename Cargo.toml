@@ -2,6 +2,9 @@
 name = "poe2"
 version = "0.3.0"
 edition = "2024"
+description = "Path of Exile 2 build analysis and trade searches, backed by headless Path of Building"
+license = "MIT"
+repository = "https://github.com/bkolof/poe2-cli"
 
 [dependencies]
 anyhow = "1.0.104"
@@ -22,3 +25,8 @@ cc = "1.5.0"
 
 [target."cfg(unix)".dependencies]
 libc = "0.2.189"
+
+# The profile that 'dist' will build with
+[profile.dist]
+inherits = "release"
+lto = "thin"
