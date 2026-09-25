@@ -166,6 +166,18 @@ fn analyses_a_build() {
         })
     };
 
+    // PoB counts gems whose requirements a change breaks; whatif warns.
+    let plain = pob
+        .what_if(&WhatIfRequest {
+            item: Some("Rarity: Rare\nTest Charm\nLunar Amulet\n+50 to maximum Life".into()),
+            ..Default::default()
+        })
+        .unwrap();
+    assert_eq!(
+        plain.results[0].problems,
+        ["the support gems need 35 Strength, the build would have 17"]
+    );
+
     // The belt has one charm slot and a quest grants another.
     assert_eq!(
         item_slots(CHARM, None, &[]).unwrap(),

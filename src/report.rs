@@ -136,6 +136,10 @@ pub fn what_if(result: &WhatIf) {
             println!("  no stat changes");
         }
 
+        for problem in &entry.problems {
+            println!("  Warning: {problem}; PoB still counts it, the game would not.");
+        }
+
         for change in &entry.changes {
             let percent = change
                 .percent
@@ -348,8 +352,8 @@ pub fn uniques_for(slot: &str, league: &str, uniques: &[PricedUnique], rates: &R
             format!(", needs level {}", c.level_required)
         };
 
-        if c.impact.spirit_short {
-            level.push_str(", leaves Spirit short");
+        for problem in &c.impact.problems {
+            level.push_str(&format!(", {problem}"));
         }
         println!(
             "{:>6.1}  {}  {:<24}{} ({}{level})",
@@ -450,16 +454,46 @@ pub fn trade_search(found: &SlotSearch, league: &str, rates: &Rates, by: Rank) {
         println!("\n{unwearable} more would need higher attributes than the build has.");
     }
 
-    let spirit_short = found
+    let broken: Vec<&PricedListing> = found
         .listings
         .iter()
-        .filter(|l| l.listing.impact.spirit_short)
-        .count();
+        .filter(|l| !l.listing.impact.problems.is_empty())
+        .collect();
 
-    if spirit_short > 0 {
+    if !broken.is_empty() {
         println!(
-            "{spirit_short} more would leave too little Spirit for the build's reservations, disabling skills in game;\n\
-             require Spirit (e.g. --require \"spirit=30\") to search items that keep enough."
+            "{} more would break something PoB still counts but the game would not:",
+            broken.len()
+        );
+        // The same problem with different numbers counts once.
+        let kind = |problem: &str| -> String {
+            if problem.contains("Spirit") {
+                "too little Spirit for the build's reservations".into()
+            } else {
+                problem
+                    .split(", the build would have")
+                    .next()
+                    .unwrap_or(problem)
+                    .into()
+            }
+        };
+        let mut problems: Vec<(String, usize)> = Vec::new();
+
+        for problem in broken.iter().flat_map(|l| &l.listing.impact.problems) {
+            let kind = kind(problem);
+
+            match problems.iter_mut().find(|(k, _)| *k == kind) {
+                Some((_, count)) => *count += 1,
+                None => problems.push((kind, 1)),
+            }
+        }
+
+        for (problem, count) in &problems {
+            println!("  {problem} ({count})");
+        }
+
+        println!(
+            "Require what the current item gives (e.g. --require \"spirit=30\" or \"intelligence=20\") to search items that keep it."
         );
     }
 
@@ -849,7 +883,7 @@ mod tests {
             ehp_percent: -4.0,
             life: 0.0,
             energy_shield: 0.0,
-            spirit_short: false,
+            problems: Vec::new(),
         };
 
         assert_eq!(score(&impact, Rank::Balanced), 3.0);

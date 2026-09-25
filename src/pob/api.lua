@@ -56,6 +56,37 @@ local function compare(baseOutput, output)
 	return changes
 end
 
+-- What a change breaks that PoB still counts, as the game would not: skills
+-- reserving more Spirit than the build has, and items and gems whose
+-- attribute requirements it no longer meets. Only new problems are listed.
+local attributeNames = { Str = "Strength", Dex = "Dexterity", Int = "Intelligence" }
+
+local function problems(baseOutput, output)
+	local found = {}
+
+	if (output.SpiritUnreserved or 0) < 0 and (baseOutput.SpiritUnreserved or 0) >= 0 then
+		table.insert(found, string.format("reserves %d more Spirit than the build has", -output.SpiritUnreserved))
+	end
+
+	for _, attr in ipairs({ "Str", "Dex", "Int" }) do
+		local function unmet(o)
+			return (o["Req" .. attr] or 0) > (o[attr] or 0)
+		end
+
+		if unmet(output) and not unmet(baseOutput) then
+			local source = output["Req" .. attr .. "Item"] or {}
+			local name = source.sourceItem and source.sourceItem.name
+				or source.sourceGem and source.sourceGem.nameSpec
+			table.insert(found, string.format("%s %d %s, the build would have %d",
+				name and (name .. " needs") or "the support gems need",
+				output["Req" .. attr], attributeNames[attr], output[attr] or 0))
+		end
+	end
+
+	-- An empty table would reach Rust as a map, not an empty list.
+	return #found > 0 and found or nil
+end
+
 -- The headline numbers used to rank passives and mods against each other.
 local function impact(baseOutput, output, points)
 	local function total(o, stat)
@@ -73,9 +104,7 @@ local function impact(baseOutput, output, points)
 		ehpPercent = percent("TotalEHP"),
 		life = (output.Life or 0) - (baseOutput.Life or 0),
 		energyShield = (output.EnergyShield or 0) - (baseOutput.EnergyShield or 0),
-		-- PoB keeps calculating reservations the Spirit no longer covers; in
-		-- game, skills would be disabled.
-		spiritShort = (output.SpiritUnreserved or 0) < 0 and (baseOutput.SpiritUnreserved or 0) >= 0,
+		problems = problems(baseOutput, output),
 	}
 end
 
@@ -326,7 +355,8 @@ function poe2.whatIf(request)
 	local calcFunc, baseOutput = build.calcsTab:GetMiscCalculator()
 
 	if not request.item then
-		return { points = points, passives = passives, results = { { changes = compare(baseOutput, calcFunc(override)) } } }
+		local output = calcFunc(override)
+		return { points = points, passives = passives, results = { { changes = compare(baseOutput, output), problems = problems(baseOutput, output) } } }
 	end
 
 	local item = new("Item", request.item)
@@ -377,11 +407,13 @@ function poe2.whatIf(request)
 			local current = itemsTab.items[itemsTab.slots[slotName].selItemId]
 			override.repSlotName = slotName
 			override.repItem = item
+			local output = calc(override)
 
 			table.insert(results, {
 				slot = slotName,
 				replacing = current and current.name,
-				changes = compare(base, calc(override)),
+				changes = compare(base, output),
+				problems = problems(base, output),
 			})
 		end
 	end

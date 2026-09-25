@@ -84,6 +84,9 @@ pub struct WhatIfResult {
     pub replacing: Option<String>,
     #[serde(default)]
     pub changes: Vec<StatChange>,
+    /// What the change breaks that PoB still counts; see `Impact::problems`.
+    #[serde(default)]
+    pub problems: Vec<String>,
 }
 
 /// A stat that changed, formatted the way PoB shows it.
@@ -108,10 +111,10 @@ pub struct Impact {
     pub ehp_percent: f64,
     pub life: f64,
     pub energy_shield: f64,
-    /// It reserves more Spirit than the build has, which would disable skills
-    /// in game; PoB still counts them.
+    /// What the change breaks that PoB still counts and the game would not:
+    /// Spirit short of reservations, unmet attribute requirements.
     #[serde(default)]
-    pub spirit_short: bool,
+    pub problems: Vec<String>,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

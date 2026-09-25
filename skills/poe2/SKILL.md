@@ -93,10 +93,12 @@ from poe.ninja, for the character's league.
   wants, such as movement speed on boots, add `--require "movement speed=25"`
   (a text to find the trade site stat by, then a minimum). Ask the user about
   this for boots.
-- Items that would leave the build's Spirit short of its reservations (which
-  disables skills in game, though PoB still counts them) are never listed as
-  upgrades. When the current item gives Spirit, add
-  `--require "spirit=N"` to search items that keep enough.
+- PoB keeps counting skills with too little Spirit, and items and gems whose
+  attribute requirements are no longer met; the game disables them. Items that
+  would cause that are never listed as upgrades, `whatif` prints a warning,
+  and `uniques-for` names the problem. When the current item gives Spirit or
+  attributes the build needs, add `--require "spirit=N"` (or
+  `"intelligence=N"`) to search items that keep enough.
 - A stat text several trade stats share (the two "+# to Spirit" stats) matches
   any of them.
 - `--open` opens the search on the trade site in the user's browser, where
