@@ -206,6 +206,17 @@ fn analyses_a_build() {
     assert!(equipped.iter().any(|i| i.slot == "Jewel 32763"));
     assert!(!equipped.iter().any(|i| i.slot.contains("Swap")));
 
+    // Fists of Stone gloves are priced as the gloves they were.
+    let gloves = equipped.iter().find(|i| i.slot == "Gloves").unwrap();
+    assert!(gloves.trade_base.is_none() && gloves.note.is_some());
+    assert!(
+        gloves
+            .mods
+            .iter()
+            .any(|m| m.text == "+28% to Fire Resistance")
+    );
+    assert!(!gloves.mods.iter().any(|m| m.text.contains("Maximum")));
+
     let unique = pob
         .price_item("Rarity: Unique\nAtziri's Step\nCinched Boots\n30% increased Movement Speed")
         .unwrap();

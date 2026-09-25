@@ -134,6 +134,10 @@ the cheapest 10 listings, so a single fake cheap listing does not set it.
   search, or from few listings, is rough.
 - Rune lines are left out, as runes can be swapped. Mods the trade site has no
   stat for are listed as not searchable.
+- Gloves turned into Fists of Stone (the Martial Artist's ascendancy) are
+  priced as the gloves they were: each transformed mod is traced back to the
+  mod it came from, rolled as high, on any gloves base. Lines several mods
+  turn into cannot be traced and are left out.
 - `poe2 price BUILD` prices every equipped item, one to four searches each,
   and takes a minute or two within the rate limits. Items nobody lists (some
   quest bases) show `?`.

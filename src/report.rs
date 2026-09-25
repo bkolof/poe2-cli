@@ -538,6 +538,10 @@ fn price_check(check: &PriceCheck, league: &str, rates: &Rates) {
     );
     let within = format!("{}%", (check.tolerance * 100.0).round());
 
+    if let Some(note) = &item.note {
+        println!("{note}.");
+    }
+
     if item.unique {
         println!("Searched by name{}.", corrupted(item.corrupted));
     } else if item.mods.is_empty() {

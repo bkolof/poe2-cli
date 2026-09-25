@@ -920,17 +920,211 @@ local function priceSlot(item)
 	return "Weapon 1"
 end
 
+-- A mod line with every number and range replaced by #, and its ranges in
+-- order (a fixed number is a range of one value).
+local function rangeTemplate(line)
+	local ranges, i = {}, 1
+
+	while true do
+		local rangeStart, rangeEnd, low, high = line:find("%((%d+%.?%d*)%-(%d+%.?%d*)%)", i)
+		local numberStart, numberEnd, number = line:find("(%d+%.?%d*)", i)
+
+		if not numberStart then
+			break
+		end
+
+		if rangeStart and rangeStart < numberStart then
+			table.insert(ranges, { tonumber(low), tonumber(high) })
+			i = rangeEnd + 1
+		else
+			table.insert(ranges, { tonumber(number), tonumber(number) })
+			i = numberEnd + 1
+		end
+	end
+
+	local template = line:gsub("%((%d+%.?%d*)%-(%d+%.?%d*)%)", "#"):gsub("%d+%.?%d*", "#")
+	return template, ranges
+end
+
+-- How high a line rolled within a mod line's ranges (0 to 1), or nil when it
+-- is not that mod line.
+local function rollWithin(itemLine, modLine)
+	local itemTemplate, values = rangeTemplate(itemLine)
+	local modTemplate, ranges = rangeTemplate(modLine)
+
+	if itemTemplate ~= modTemplate or #values ~= #ranges then
+		return nil
+	end
+
+	local roll = 0.5
+
+	for index, range in ipairs(ranges) do
+		local low, high = math.min(range[1], range[2]), math.max(range[1], range[2])
+		local value = values[index][1]
+
+		if value < low or value > high then
+			return nil
+		end
+
+		if high > low then
+			roll = (value - low) / (high - low)
+		end
+	end
+
+	return roll
+end
+
+-- A mod line with its ranges rolled at `roll` (0 to 1).
+local function rollLine(line, roll)
+	return (line:gsub("%((%d+%.?%d*)%-(%d+%.?%d*)%)", function(low, high)
+		local value = tonumber(low) + roll * (tonumber(high) - tonumber(low))
+		local whole = not low:find("%.") and not high:find("%.")
+		return whole and tostring(math.floor(value + 0.5)) or string.format("%.1f", value)
+	end))
+end
+
+-- The Martial Artist's Fists of Stone turns equipped gloves into Fists of
+-- Stone and each explicit mod into a HandWraps version of it. The gloves are
+-- listed as they were, so each HandWraps mod is matched by its lines and
+-- values, and replaced by the mod it came from (HandWrapsFireResist4 from
+-- FireResist4), rolled as high within its range. Several mods can become the
+-- same HandWraps lines; those cannot be traced back.
+local function untransformFistsOfStone(item)
+	local lines = {}
+
+	for _, list in ipairs({ item.implicitModLines, item.explicitModLines }) do
+		for _, modLine in ipairs(list) do
+			table.insert(lines, modLine.line)
+		end
+	end
+
+	local matches = {}
+
+	for modId, mod in pairs(data.itemMods.Item) do
+		if modId:match("^HandWraps") then
+			local used, roll = {}, nil
+
+			for _, modLine in ipairs(mod) do
+				local found
+
+				for index, line in ipairs(lines) do
+					local lineRoll = not used[index] and rollWithin(line, modLine)
+
+					if lineRoll then
+						found = index
+						roll = roll or lineRoll
+						break
+					end
+				end
+
+				if not found then
+					used = nil
+					break
+				end
+
+				used[found] = true
+			end
+
+			if used then
+				local indices = {}
+
+				for index in pairs(used) do
+					table.insert(indices, index)
+				end
+
+				table.sort(indices)
+				local key = table.concat(indices, ",")
+				matches[key] = matches[key] or { indices = indices, origins = {} }
+				matches[key].origins[modId:gsub("^HandWraps", "")] = roll
+			end
+		end
+	end
+
+	local ordered = {}
+
+	for _, match in pairs(matches) do
+		table.insert(ordered, match)
+	end
+
+	-- Mods with more lines first, so a two-line mod is not split up.
+	table.sort(ordered, function(a, b)
+		if #a.indices ~= #b.indices then
+			return #a.indices > #b.indices
+		end
+
+		return a.indices[1] < b.indices[1]
+	end)
+
+	local taken, original, untraced = {}, {}, {}
+
+	for _, match in ipairs(ordered) do
+		local free = true
+
+		for _, index in ipairs(match.indices) do
+			free = free and not taken[index]
+		end
+
+		if free then
+			local groups, originId, roll = {}, nil, nil
+
+			for id, idRoll in pairs(match.origins) do
+				groups[(id:gsub("%d+$", ""))] = true
+				originId, roll = id, idRoll
+			end
+
+			local count = 0
+
+			for _ in pairs(groups) do
+				count = count + 1
+			end
+
+			local origin = count == 1 and data.itemMods.Item[originId]
+
+			for _, index in ipairs(match.indices) do
+				taken[index] = true
+
+				if not origin then
+					table.insert(untraced, lines[index])
+				end
+			end
+
+			if origin then
+				for _, modLine in ipairs(origin) do
+					table.insert(original, rollLine(modLine, roll))
+				end
+			end
+		end
+	end
+
+	return original, untraced
+end
+
 -- What a price check searches for: a unique by name, or an item's category,
 -- defences and mods, matched to trade stats the way PoB's "Buy similar" does.
 local function describeForPrice(item, slotName)
 	local unique = item.rarity == "UNIQUE" or item.rarity == "RELIC"
 	local mods, unsearchable, defences = {}, {}, {}
+	local fistsOfStone = item.baseName:match("Fists of Stone$") ~= nil
+	local searched = item
+	local note
+
+	if fistsOfStone and not unique then
+		-- Search for the gloves as they were, on any base: the original base and
+		-- its defences are not known.
+		local original, untraced = untransformFistsOfStone(item)
+		searched = new("Item", "Rarity: RARE\nPrice Check\nStocky Mitts\nImplicits: 0\n" .. table.concat(original, "\n"))
+		note = "Fists of Stone gloves are priced as the gloves they were, on any base, with each mod turned back into the one it came from"
+
+		for _, line in ipairs(untraced) do
+			table.insert(unsearchable, line .. " (not traceable to one original mod)")
+		end
+	end
 
 	if not unique then
-		local entries = buySimilar.addModEntries(item, {
-			{ list = item.enchantModLines, type = "enchant" },
-			{ list = item.implicitModLines, type = "implicit" },
-			{ list = item.explicitModLines, type = "explicit" },
+		local entries = buySimilar.addModEntries(searched, {
+			{ list = searched.enchantModLines, type = "enchant" },
+			{ list = searched.implicitModLines, type = "implicit" },
+			{ list = searched.explicitModLines, type = "explicit" },
 		})
 
 		for _, entry in ipairs(entries) do
@@ -956,7 +1150,7 @@ local function describeForPrice(item, slotName)
 		end
 
 		for key, id in pairs({ Armour = "ar", Evasion = "ev", EnergyShield = "es" }) do
-			local value = item.armourData and item.armourData[key]
+			local value = not fistsOfStone and item.armourData and item.armourData[key]
 
 			if value and value > 0 then
 				defences[id] = value
@@ -968,6 +1162,9 @@ local function describeForPrice(item, slotName)
 		slot = slotName,
 		name = item.title or item.name,
 		base = item.baseName,
+		-- The base to search by, when it is a real one.
+		tradeBase = not fistsOfStone and item.baseName or nil,
+		note = note,
 		rarity = item.rarity,
 		unique = unique,
 		category = (tradeHelpers.getTradeCategory(slotName, item)),

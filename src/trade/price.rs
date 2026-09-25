@@ -38,7 +38,11 @@ pub fn query(item: &PriceItem, status: &str, tolerance: f64, required: usize) ->
 
     if item.unique {
         q["name"] = json!(item.name);
-        q["type"] = json!(item.base);
+
+        if let Some(base) = &item.trade_base {
+            q["type"] = json!(base);
+        }
+
         return query;
     }
 
@@ -47,8 +51,10 @@ pub fn query(item: &PriceItem, status: &str, tolerance: f64, required: usize) ->
     }
 
     // Normal and magic items are worth their base more than their mods.
-    if item.rarity == "NORMAL" || item.rarity == "MAGIC" {
-        q["type"] = json!(item.base);
+    if let Some(base) = &item.trade_base
+        && (item.rarity == "NORMAL" || item.rarity == "MAGIC")
+    {
+        q["type"] = json!(base);
     }
 
     for (id, value) in &item.defences {
@@ -289,6 +295,8 @@ mod tests {
             slot: "Boots".into(),
             name: "Grim Pace".into(),
             base: "Quickslip Shoes".into(),
+            trade_base: Some("Quickslip Shoes".into()),
+            note: None,
             rarity: "RARE".into(),
             unique: false,
             category: Some("armour.boots".into()),
@@ -364,6 +372,7 @@ mod tests {
         unique.unique = true;
         unique.name = "Atziri's Step".into();
         unique.base = "Cinched Boots".into();
+        unique.trade_base = Some("Cinched Boots".into());
         let q = query(&unique, "available", 0.1, 0);
 
         assert_eq!(q["query"]["name"], "Atziri's Step");

@@ -246,11 +246,16 @@ pub struct TradeWeight {
 
 /// An item as a price check searches for it.
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
 pub struct PriceItem {
     /// The slot it is equipped in, or whose trade category it belongs to.
     pub slot: String,
     pub name: String,
     pub base: String,
+    /// The base to search by; none when the base is not a real one (Fists of Stone).
+    pub trade_base: Option<String>,
+    /// How the item was searched for when that is not obvious.
+    pub note: Option<String>,
     pub rarity: String,
     pub unique: bool,
     /// The trade site category, e.g. "armour.boots".
