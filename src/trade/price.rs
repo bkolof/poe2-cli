@@ -7,7 +7,9 @@ use serde_json::{Value, json};
 
 use super::{Client, search_url};
 use crate::market::Rates;
-use crate::pob::model::{PriceItem, PriceMod};
+use crate::pob::model::{PriceItem, PriceMod, WeaponStats};
+
+mod rules;
 
 /// Enough listings to price from; with fewer, the search relaxes.
 pub const ENOUGH_LISTINGS: u64 = 10;
@@ -104,14 +106,54 @@ fn local_defence(text: &str) -> bool {
     flat || increased
 }
 
-/// The stats a price check searches for: the item's mods, with those that add
-/// to resistance, life, mana and attribute totals folded into the totals, and
-/// an armour piece's defence mods left to its defence values. Requiring each
-/// mod on its own finds only items at least as good in every one, which are
-/// few and dearer.
-pub fn searched_stats(item: &PriceItem) -> Vec<PriceMod> {
+/// Whether a mod adds to an attack weapon's own damage, attack speed or
+/// critical hit chance, which the search covers through its DPS.
+fn local_weapon(text: &str) -> bool {
+    let adds = text.starts_with("Adds ")
+        && ["Physical", "Fire", "Cold", "Lightning", "Chaos"]
+            .iter()
+            .any(|t| {
+                text.ends_with(&format!(" {t} Damage")) || text.ends_with(&format!(" {t} damage"))
+            });
+    adds || text.ends_with("% increased Physical Damage")
+        || text.ends_with("% increased Attack Speed")
+        || (text.starts_with('+') && text.ends_with("% to Critical Hit Chance"))
+}
+
+/// A mod a price check leaves out, and why.
+#[derive(Debug, Clone, Serialize)]
+pub struct LeftOut {
+    pub text: String,
+    pub reason: String,
+}
+
+/// What a price check searches for, and what it leaves out.
+#[derive(Debug, Default)]
+pub struct Selection {
+    pub stats: Vec<PriceMod>,
+    pub left_out: Vec<LeftOut>,
+}
+
+/// The stats a price check searches for, compared the way traders compare
+/// items. Requiring each mod on its own finds only items at least as good in
+/// every one, which are few and dearer, so:
+/// - resistance, life, mana and attribute mods are summed into the site's
+///   pseudo totals;
+/// - an armour piece's defence mods, and an attack weapon's damage, attack
+///   speed and critical hit mods, are left to its defences and DPS;
+/// - the rest are judged by `rules::judge`: stats that set prices are kept,
+///   filler is left out.
+pub fn select(item: &PriceItem) -> Selection {
     let armour = !item.defences.is_empty();
+    let weapon = item.weapon.as_ref().is_some_and(|w| w.total_dps > 0.0);
     let mut totals = [0.0; TOTALS.len()];
+    let mut selection = Selection::default();
+    let mut leave_out = |text: &str, reason: &str| {
+        selection.left_out.push(LeftOut {
+            text: text.into(),
+            reason: reason.into(),
+        })
+    };
     let mut stats = Vec::new();
 
     for m in &item.mods {
@@ -120,6 +162,12 @@ pub fn searched_stats(item: &PriceItem) -> Vec<PriceMod> {
         let folds = totals_of(first);
 
         if armour && local_defence(first) {
+            leave_out(&m.text, "counted in the item's defences");
+            continue;
+        }
+
+        if weapon && local_weapon(first) {
+            leave_out(&m.text, "counted in the weapon's DPS");
             continue;
         }
 
@@ -129,7 +177,10 @@ pub fn searched_stats(item: &PriceItem) -> Vec<PriceMod> {
                     totals[total] += value * times;
                 }
             }
-            _ => stats.push(m.clone()),
+            _ => match rules::judge(m, item) {
+                Ok(()) => stats.push(m.clone()),
+                Err(reason) => leave_out(&m.text, &reason),
+            },
         }
     }
 
@@ -140,13 +191,34 @@ pub fn searched_stats(item: &PriceItem) -> Vec<PriceMod> {
                 text: format!("+{total}{label}"),
                 ids: vec![id.into()],
                 value: Some(*total),
-                invert: false,
-                option: false,
+                kind: "pseudo".into(),
+                ..Default::default()
             });
         }
     }
 
-    stats
+    selection.stats = stats;
+    selection
+}
+
+/// The weapon DPS a search requires: physical or elemental DPS when one makes
+/// up most of the damage, and the total when no one kind does, or when a
+/// physical weapon also has a real share of elemental damage.
+fn weapon_filters(weapon: &WeaponStats) -> Vec<(&'static str, f64)> {
+    let share = |dps: f64| dps / weapon.total_dps;
+    let mut filters = Vec::new();
+
+    if share(weapon.physical_dps) >= rules::MAIN_DAMAGE_SHARE {
+        filters.push(("pdps", weapon.physical_dps));
+    } else if share(weapon.elemental_dps) >= rules::MAIN_DAMAGE_SHARE {
+        filters.push(("edps", weapon.elemental_dps));
+    }
+
+    if filters.is_empty() || share(weapon.elemental_dps) >= rules::MINOR_DAMAGE_SHARE {
+        filters.push(("dps", weapon.total_dps));
+    }
+
+    filters
 }
 
 /// The search for listings like the item, cheapest first: a unique by name,
@@ -181,16 +253,28 @@ pub fn query(
         q["filters"]["type_filters"]["filters"]["category"] = json!({ "option": category });
     }
 
-    // Normal and magic items are worth their base more than their mods.
+    // Normal and magic items are worth their base more than their mods, and
+    // crafting bases their item level.
     if let Some(base) = &item.trade_base
         && (item.rarity == "NORMAL" || item.rarity == "MAGIC")
     {
         q["type"] = json!(base);
     }
 
+    if let Some(level) = rules::base_item_level(item) {
+        q["filters"]["type_filters"]["filters"]["ilvl"] = json!({ "min": level });
+    }
+
     for (id, value) in &item.defences {
         q["filters"]["equipment_filters"]["filters"][id] =
             json!({ "min": (value * (1.0 - tolerance)).floor() });
+    }
+
+    if let Some(weapon) = item.weapon.as_ref().filter(|w| w.total_dps > 0.0) {
+        for (id, dps) in weapon_filters(weapon) {
+            q["filters"]["equipment_filters"]["filters"][id] =
+                json!({ "min": (dps * (1.0 - tolerance)).floor() });
+        }
     }
 
     let searched = stats;
@@ -353,6 +437,8 @@ pub struct PriceCheck {
     pub item: PriceItem,
     /// The stats searched for, from its mods.
     pub searched: Vec<PriceMod>,
+    /// Mods not searched for, and why.
+    pub left_out: Vec<LeftOut>,
     /// How many of them the listings have, at the tolerance or better.
     pub required: usize,
     pub tolerance: f64,
@@ -363,6 +449,8 @@ pub struct PriceCheck {
     pub estimate: Option<f64>,
     /// poe.ninja's price for a unique, in divines.
     pub ninja: Option<f64>,
+    /// The search that found the listings.
+    pub query: Value,
 }
 
 /// Search for listings like the item, relaxing until enough match, and
@@ -376,25 +464,26 @@ pub fn check(
     tolerance: f64,
     fetch: usize,
 ) -> Result<PriceCheck> {
-    let searched = if item.unique {
-        Vec::new()
+    let selection = if item.unique {
+        Selection::default()
     } else {
-        searched_stats(&item)
+        select(&item)
     };
+    let searched = selection.stats;
     let mut found = None;
 
     for required in required_steps(searched.len()) {
         let query = query(&item, &searched, status, tolerance, required);
         let result = client.search(league, &query)?;
         let enough = result.total.unwrap_or(result.result.len() as u64) >= ENOUGH_LISTINGS;
-        found = Some((required, result));
+        found = Some((required, result, query));
 
         if enough {
             break;
         }
     }
 
-    let (required, result) = found.expect("there is always a first search");
+    let (required, result, query) = found.expect("there is always a first search");
     let ids: Vec<String> = result.result.iter().take(fetch).cloned().collect();
     let mut offers = if ids.is_empty() {
         Vec::new()
@@ -411,8 +500,10 @@ pub fn check(
         total: result.total,
         estimate: estimate(&offers),
         ninja: None,
+        query,
         item,
         searched,
+        left_out: selection.left_out,
         required,
         tolerance,
         offers,
@@ -430,7 +521,8 @@ mod tests {
             ids: ids.iter().map(|id| id.to_string()).collect(),
             value: Some(value),
             invert,
-            option: false,
+            kind: "explicit".into(),
+            ..Default::default()
         };
         PriceItem {
             slot: "Boots".into(),
@@ -465,6 +557,8 @@ mod tests {
             ],
             unsearchable: Vec::new(),
             defences: [("es".to_string(), 205.0)].into(),
+            item_level: Some(80),
+            weapon: None,
         }
     }
 
@@ -513,8 +607,8 @@ mod tests {
             text: text.into(),
             ids: vec![format!("explicit.{text}")],
             value: Some(value),
-            invert: false,
-            option: false,
+            kind: "explicit".into(),
+            ..Default::default()
         };
         let mut armour = item();
         armour.mods = vec![
@@ -529,10 +623,7 @@ mod tests {
             m("+5 to all Attributes", 5.0),
         ];
 
-        let texts: Vec<String> = searched_stats(&armour)
-            .into_iter()
-            .map(|s| s.text)
-            .collect();
+        let texts: Vec<String> = select(&armour).stats.into_iter().map(|s| s.text).collect();
         assert_eq!(
             texts,
             [
@@ -547,9 +638,66 @@ mod tests {
         // Without defences of its own, an item's defence mods are searched.
         armour.defences.clear();
         assert!(
-            searched_stats(&armour)
+            select(&armour)
+                .stats
                 .iter()
                 .any(|s| s.text.contains("Evasion Rating"))
+        );
+    }
+
+    #[test]
+    fn compares_attack_weapons_by_dps() {
+        let weapon = |physical: f64, elemental: f64| WeaponStats {
+            physical_dps: physical,
+            elemental_dps: elemental,
+            total_dps: physical + elemental,
+            crit_chance: 10.0,
+            attack_rate: 1.4,
+        };
+        assert_eq!(weapon_filters(&weapon(300.0, 20.0)), [("pdps", 300.0)]);
+        assert_eq!(
+            weapon_filters(&weapon(10.0, 300.0)),
+            [("edps", 300.0), ("dps", 310.0)]
+        );
+        assert_eq!(
+            weapon_filters(&weapon(211.0, 97.0)),
+            [("pdps", 211.0), ("dps", 308.0)]
+        );
+        assert_eq!(weapon_filters(&weapon(180.0, 120.0)), [("dps", 300.0)]);
+
+        assert!(local_weapon("Adds 33 to 55 Cold Damage"));
+        assert!(local_weapon("32% increased Physical Damage"));
+        assert!(local_weapon("16% increased Attack Speed"));
+        assert!(local_weapon("+2.5% to Critical Hit Chance"));
+        assert!(!local_weapon("Adds 14 to 23 Cold damage to Attacks"));
+        assert!(!local_weapon("86% increased Elemental Damage with Attacks"));
+
+        let mut staff = item();
+        staff.defences.clear();
+        staff.weapon = Some(weapon(180.0, 120.0));
+        staff.mods.push(PriceMod {
+            text: "Adds 33 to 55 Cold Damage".into(),
+            ids: vec!["explicit.cold".into()],
+            value: Some(33.0),
+            ..Default::default()
+        });
+        let selection = select(&staff);
+        assert!(
+            selection
+                .left_out
+                .iter()
+                .any(|l| l.reason == "counted in the weapon's DPS")
+        );
+        let q = query(
+            &staff,
+            &selection.stats,
+            "available",
+            0.1,
+            selection.stats.len(),
+        );
+        assert_eq!(
+            q["query"]["filters"]["equipment_filters"]["filters"]["dps"],
+            json!({ "min": 270.0 })
         );
     }
 

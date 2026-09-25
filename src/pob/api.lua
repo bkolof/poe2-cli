@@ -1099,6 +1099,75 @@ local function untransformFistsOfStone(item)
 	return original, untraced
 end
 
+-- Each explicit mod line's tier among the mods of its kind that can roll on
+-- the item's base, 1 being the best: the line (with the other lines of its
+-- mod) is matched to a mod by text and values, and ranked by level within
+-- its group. Keyed by line text; mods PoB has no data for have no tier.
+local function modTiers(item)
+	local lines = {}
+
+	for _, modLine in ipairs(item.explicitModLines) do
+		table.insert(lines, modLine.line)
+	end
+
+	local levels, found = {}, {}
+	-- Jewels, flasks and charms roll from mod lists of their own.
+	local modLists = { Jewel = data.itemMods.Jewel, Flask = data.itemMods.Flask, Charm = data.itemMods.Charm }
+	local subType = item.base.subType == "Charm" and "Charm"
+
+	for _, mod in pairs(modLists[subType or item.type] or data.itemMods.Item) do
+		if mod.group and item:GetModSpawnWeight(mod) > 0 then
+			local key = mod.group .. ":" .. mod.type
+			levels[key] = levels[key] or {}
+			table.insert(levels[key], mod.level)
+			local used = {}
+
+			for _, modLine in ipairs(mod) do
+				local match, roll
+
+				for index, line in ipairs(lines) do
+					roll = not used[index] and rollWithin(line, modLine)
+
+					if roll then
+						match = index
+						break
+					end
+				end
+
+				if not match then
+					used = nil
+					break
+				end
+
+				used[match] = roll
+			end
+
+			for index, roll in pairs(used or {}) do
+				-- A mod matching more lines explains them better.
+				if not found[index] or #mod > found[index].lines then
+					found[index] = { key = key, level = mod.level, lines = #mod, roll = roll }
+				end
+			end
+		end
+	end
+
+	local tiers = {}
+
+	for index, match in pairs(found) do
+		local tier = 1
+
+		for _, level in ipairs(levels[match.key]) do
+			if level > match.level then
+				tier = tier + 1
+			end
+		end
+
+		tiers[lines[index]] = { tier = tier, tiers = #levels[match.key], roll = match.roll }
+	end
+
+	return tiers
+end
+
 -- What a price check searches for: a unique by name, or an item's category,
 -- defences and mods, matched to trade stats the way PoB's "Buy similar" does.
 local function describeForPrice(item, slotName)
@@ -1107,6 +1176,19 @@ local function describeForPrice(item, slotName)
 	local fistsOfStone = item.baseName:match("Fists of Stone$") ~= nil
 	local searched = item
 	local note
+	local weapon
+
+	-- Attack weapons are compared by their damage, which PoB calculates.
+	if item.weaponData and item.weaponData[1] and not unique then
+		local stats = item.weaponData[1]
+		weapon = {
+			physicalDps = stats.PhysicalDPS or 0,
+			elementalDps = stats.ElementalDPS or 0,
+			totalDps = stats.TotalDPS or 0,
+			critChance = stats.CritChance or 0,
+			attackRate = stats.AttackRate or 0,
+		}
+	end
 
 	if fistsOfStone and not unique then
 		-- Search for the gloves as they were, on any base: the original base and
@@ -1121,6 +1203,7 @@ local function describeForPrice(item, slotName)
 	end
 
 	if not unique then
+		local tiers = modTiers(searched)
 		local entries = buySimilar.addModEntries(searched, {
 			{ list = searched.enchantModLines, type = "enchant" },
 			{ list = searched.implicitModLines, type = "implicit" },
@@ -1128,10 +1211,16 @@ local function describeForPrice(item, slotName)
 		})
 
 		for _, entry in ipairs(entries) do
-			local lines = {}
+			local lines, tier = {}, nil
 
 			for _, line in ipairs(entry.formattedLines) do
-				table.insert(lines, stripColors(line))
+				local plain = stripColors(line)
+				table.insert(lines, plain)
+
+				-- An aggregated entry is as good as its best line.
+				if tiers[plain] and (not tier or tiers[plain].tier < tier.tier) then
+					tier = tiers[plain]
+				end
 			end
 
 			local text = table.concat(lines, ", ")
@@ -1145,6 +1234,10 @@ local function describeForPrice(item, slotName)
 					value = entry.value,
 					invert = entry.invert or false,
 					option = entry.isOption,
+					kind = entry.type,
+					tier = tier and tier.tier,
+					tiers = tier and tier.tiers,
+					roll = tier and tier.roll,
 				})
 			end
 		end
@@ -1172,6 +1265,8 @@ local function describeForPrice(item, slotName)
 		mods = mods,
 		unsearchable = unsearchable,
 		defences = defences,
+		itemLevel = item.itemLevel,
+		weapon = weapon,
 	}
 end
 

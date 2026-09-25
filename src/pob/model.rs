@@ -270,9 +270,23 @@ pub struct PriceItem {
     /// Armour ("ar"), evasion ("ev") and energy shield ("es").
     #[serde(default)]
     pub defences: BTreeMap<String, f64>,
+    pub item_level: Option<u32>,
+    /// An attack weapon's damage, as PoB calculates it.
+    pub weapon: Option<WeaponStats>,
 }
 
 #[derive(Debug, Clone, Deserialize, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct WeaponStats {
+    pub physical_dps: f64,
+    pub elemental_dps: f64,
+    pub total_dps: f64,
+    /// In percent.
+    pub crit_chance: f64,
+    pub attack_rate: f64,
+}
+
+#[derive(Debug, Clone, Default, Deserialize, Serialize)]
 pub struct PriceMod {
     pub text: String,
     /// More than one when the text matches several trade stats.
@@ -282,6 +296,16 @@ pub struct PriceMod {
     pub invert: bool,
     /// An option stat, matched exactly.
     pub option: bool,
+    /// "explicit", "implicit" or "enchant".
+    #[serde(default)]
+    pub kind: String,
+    /// Its tier among the mods of its kind that can roll on the base, 1 being
+    /// the best, when PoB knows the mod.
+    pub tier: Option<u32>,
+    /// How many tiers there are.
+    pub tiers: Option<u32>,
+    /// How high it rolled within its tier's range, from 0 to 1.
+    pub roll: Option<f64>,
 }
 
 /// A trade site stat, e.g. `pseudo.pseudo_increased_movement_speed`.

@@ -574,6 +574,24 @@ fn price_check(check: &PriceCheck, league: &str, rates: &Rates) {
         );
     }
 
+    if let Some(weapon) = &item.weapon
+        && weapon.total_dps > 0.0
+        && !item.unique
+    {
+        println!(
+            "  weapon DPS: {:.0} physical, {:.0} elemental, {:.0} total",
+            weapon.physical_dps, weapon.elemental_dps, weapon.total_dps
+        );
+    }
+
+    if !check.left_out.is_empty() {
+        println!("Left out:");
+
+        for left_out in &check.left_out {
+            println!("  {} ({})", left_out.text, left_out.reason);
+        }
+    }
+
     if !item.unsearchable.is_empty() {
         println!("Not on the trade site: {}", item.unsearchable.join(", "));
     }
@@ -656,7 +674,7 @@ fn price_summary(checks: &[PriceCheck], league: &str, rates: &Rates) {
         n => println!("{n} items had no priced listings and are left out."),
     }
 
-    println!("Items with few listings, or with some mods left out, have rough estimates.");
+    println!("Items with few listings, or found by a relaxed search, have rough estimates.");
 }
 
 fn corrupted(corrupted: bool) -> &'static str {

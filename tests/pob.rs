@@ -201,6 +201,18 @@ fn analyses_a_build() {
     let belt = equipped.iter().find(|i| i.slot == "Belt").unwrap();
     assert_eq!(belt.category.as_deref(), Some("accessory.belt"));
     assert!(belt.mods.iter().any(|m| m.text == "+171 to maximum Life"));
+    let tier = |item: &str, text: &str| {
+        let item = equipped.iter().find(|i| i.slot == item).unwrap();
+        let m = item.mods.iter().find(|m| m.text == text).unwrap();
+        (m.tier, m.tiers)
+    };
+    assert_eq!(
+        tier("Boots", "30% increased Movement Speed"),
+        (Some(2), Some(6))
+    );
+    assert_eq!(tier("Belt", "+171 to maximum Life"), (Some(1), Some(10)));
+    let staff = equipped.iter().find(|i| i.slot == "Weapon 1").unwrap();
+    assert!(staff.weapon.as_ref().unwrap().physical_dps > 200.0);
     let helmet = equipped.iter().find(|i| i.slot == "Helmet").unwrap();
     assert!(!helmet.mods.iter().any(|m| m.text.contains("Bonded")));
     assert!(equipped.iter().any(|i| i.slot == "Jewel 32763"));

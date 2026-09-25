@@ -122,23 +122,37 @@ repeatable; a stat is a text to find it by or a trade id from `trade stats`):
 
 ### Price checks
 
-`poe2 price` works like Sidekick's price check, without adjusting filters by
+`poe2 price` prices items the way traders do, without adjusting filters by
 hand, and needs no login. A unique is searched by name, with poe.ninja's price
-shown too. Anything else is searched by its category, its defences and its
-mods, each within `--tolerance` percent of the item's value (default 10), the
-way traders compare items: resistance, life, mana and attribute mods are
-summed into the site's pseudo totals (+58% total Elemental Resistance), and an
-armour piece's own defence mods are covered by its armour, evasion and energy
-shield. When fewer than 10 listings have every searched stat, it searches
-again for listings with any N of them, one fewer each time, down to half. The estimate is the median of
-the cheapest 5 listings: a single fake cheap listing does not set it, and the
-high asks of a thin market do not pull it up.
+shown too. Anything else is searched by its category and the few stats that
+set its price, each within `--tolerance` percent of the item's value (default
+10). The rules follow Exiled Exchange 2 and are in `src/trade/price/rules.rs`:
+
+- Resistance, life, mana and attribute mods are summed into the site's
+  pseudo totals (+58% total Elemental Resistance).
+- Armour pieces are compared by armour, evasion and energy shield, and attack
+  weapons by physical DPS (when it is two thirds of the damage), elemental DPS,
+  and total DPS; the mods behind those are left out.
+- Of the other mods, the best two tiers for the base are searched (T1 = best);
+  lower tiers are filler. Movement speed, skill levels, Spirit and rarity count
+  at any tier. Filler stats (stun threshold, thorns, light radius, accuracy,
+  life per kill, ailment duration on you and similar) are never searched, and
+  base implicits are left out.
+- Normal and magic items are crafting bases: searched by base type and item
+  level (up to 82, 81 for wands and staves).
+- When fewer than 10 listings match every stat, it searches again for any N of
+  them, one fewer each time, down to half.
+
+The output lists what was searched and what was left out, and why. The
+estimate is the median of the cheapest 5 listings: a single fake cheap listing
+does not set it, and the high asks of a thin market do not pull it up.
 
 - Estimates are asking prices for gear like the user's, not what they spent:
   self-found gear counts at market value, and items sell below their asks.
-
-- Say how many mods the listings had to match; an estimate from a relaxed
-  search, or from few listings, is rough.
+  Mid-tier gear with thousands of comparable listings is worth the market
+  floor, often 1 exalted.
+- Say what the search compared, and when it had to relax; an estimate from a
+  relaxed search, or from few listings, is rough.
 - Rune lines are left out, as runes can be swapped. Mods the trade site has no
   stat for are listed as not searchable.
 - Gloves turned into Fists of Stone (the Martial Artist's ascendancy) are

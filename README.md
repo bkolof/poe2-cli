@@ -78,9 +78,10 @@ search for a unique or an item base instead of PoB's weights, and jewel
 sockets (`--slot jewel`) are searched for base or radius jewels. `trade scan` runs one
 weighted search per gear slot and ranks the upgrades side by side.
 
-`price` checks what an item is worth: a unique by name, anything else by its
-mods within a tolerance, requiring fewer of them until enough listings match,
-and estimates from the median of the cheapest listings. It needs no login.
+`price` checks what an item is worth the way traders do: a unique by name,
+anything else by the stats that set its price (pseudo totals, defences, weapon
+DPS, and the best tiers of its other mods, with filler left out), and
+estimates from the median of the cheapest listings. It needs no login.
 
 Weighted searches need a logged-in session; the
 POESESSID is stored in the config directory, readable only by you. Requests
