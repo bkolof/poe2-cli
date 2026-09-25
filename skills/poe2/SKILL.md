@@ -125,9 +125,12 @@ repeatable; a stat is a text to find it by or a trade id from `trade stats`):
 `poe2 price` works like Sidekick's price check, without adjusting filters by
 hand, and needs no login. A unique is searched by name, with poe.ninja's price
 shown too. Anything else is searched by its category, its defences and its
-mods, each within `--tolerance` percent of the item's value (default 10). When
-fewer than 10 listings have every mod, it searches again for listings with
-any N of them, one fewer each time, down to half. The estimate is the median of
+mods, each within `--tolerance` percent of the item's value (default 10), the
+way traders compare items: resistance, life, mana and attribute mods are
+summed into the site's pseudo totals (+58% total Elemental Resistance), and an
+armour piece's own defence mods are covered by its armour, evasion and energy
+shield. When fewer than 10 listings have every searched stat, it searches
+again for listings with any N of them, one fewer each time, down to half. The estimate is the median of
 the cheapest 5 listings: a single fake cheap listing does not set it, and the
 high asks of a thin market do not pull it up.
 

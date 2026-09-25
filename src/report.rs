@@ -544,27 +544,26 @@ fn price_check(check: &PriceCheck, league: &str, rates: &Rates) {
 
     if item.unique {
         println!("Searched by name{}.", corrupted(item.corrupted));
-    } else if item.mods.is_empty() {
+    } else if check.searched.is_empty() {
         println!(
             "Searched by category and defences{}.",
             corrupted(item.corrupted)
         );
-    } else if check.required == item.mods.len() {
+    } else if check.required == check.searched.len() {
         println!(
-            "Searched for all {} mods, each within {within} of its value{}:",
-            item.mods.len(),
+            "Searched for these stats, each within {within} of its value{}:",
             corrupted(item.corrupted)
         );
     } else {
         println!(
-            "Too few listings had every mod, so searched for any {} of these {}, each within {within} of its value{}:",
+            "Too few listings had every stat, so searched for any {} of these {}, each within {within} of its value{}:",
             check.required,
-            item.mods.len(),
+            check.searched.len(),
             corrupted(item.corrupted)
         );
     }
 
-    for m in &item.mods {
+    for m in &check.searched {
         println!("  {}", m.text);
     }
 
@@ -633,8 +632,8 @@ fn price_summary(checks: &[PriceCheck], league: &str, rates: &Rates) {
     for check in checks {
         let item = &check.item;
         let estimate = check.estimate.map_or("?".into(), |e| rates.format(e));
-        let matched = if !item.unique && check.required < item.mods.len() {
-            format!(" ({} of {} mods)", check.required, item.mods.len())
+        let matched = if !item.unique && check.required < check.searched.len() {
+            format!(" ({} of {} stats)", check.required, check.searched.len())
         } else {
             String::new()
         };

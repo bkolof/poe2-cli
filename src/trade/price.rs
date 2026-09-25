@@ -18,8 +18,8 @@ pub const ESTIMATE_FROM: usize = 5;
 /// Searches per item at most, one per step of relaxation.
 const MAX_SEARCHES: usize = 4;
 
-/// How many of the item's mods each search requires, strictest first: all of
-/// them, then one fewer at a time, down to half.
+/// How many of the searched stats each search requires, strictest first: all
+/// of them, then one fewer at a time, down to half.
 pub fn required_steps(mods: usize) -> Vec<usize> {
     if mods == 0 {
         return vec![0];
@@ -28,10 +28,137 @@ pub fn required_steps(mods: usize) -> Vec<usize> {
     (mods.div_ceil(2)..=mods).rev().take(MAX_SEARCHES).collect()
 }
 
+/// Pseudo totals the trade site keeps, which traders price by: where a total
+/// comes from does not matter.
+const TOTALS: &[(&str, &str)] = &[
+    (
+        "pseudo.pseudo_total_elemental_resistance",
+        "% total Elemental Resistance",
+    ),
+    (
+        "pseudo.pseudo_total_chaos_resistance",
+        "% total to Chaos Resistance",
+    ),
+    ("pseudo.pseudo_total_life", " total maximum Life"),
+    ("pseudo.pseudo_total_mana", " total maximum Mana"),
+    ("pseudo.pseudo_total_strength", " total to Strength"),
+    ("pseudo.pseudo_total_dexterity", " total to Dexterity"),
+    ("pseudo.pseudo_total_intelligence", " total to Intelligence"),
+];
+
+/// Which totals a mod adds to, and how many times its value: "+10% to all
+/// Elemental Resistances" adds 30 to the elemental total.
+fn totals_of(text: &str) -> Vec<(usize, f64)> {
+    let rest = text.trim_start_matches('+');
+    let rest = rest.trim_start_matches(|c: char| c.is_ascii_digit() || c == '.');
+    let [
+        elemental,
+        chaos,
+        life,
+        mana,
+        strength,
+        dexterity,
+        intelligence,
+    ] = [0, 1, 2, 3, 4, 5, 6];
+
+    match rest {
+        "% to Fire Resistance" | "% to Cold Resistance" | "% to Lightning Resistance" => {
+            vec![(elemental, 1.0)]
+        }
+        "% to all Elemental Resistances" => vec![(elemental, 3.0)],
+        "% to Fire and Cold Resistances"
+        | "% to Fire and Lightning Resistances"
+        | "% to Cold and Lightning Resistances" => vec![(elemental, 2.0)],
+        "% to Chaos Resistance" => vec![(chaos, 1.0)],
+        " to maximum Life" => vec![(life, 1.0)],
+        " to maximum Mana" => vec![(mana, 1.0)],
+        " to Strength" => vec![(strength, 1.0)],
+        " to Dexterity" => vec![(dexterity, 1.0)],
+        " to Intelligence" => vec![(intelligence, 1.0)],
+        " to all Attributes" => vec![(strength, 1.0), (dexterity, 1.0), (intelligence, 1.0)],
+        " to Strength and Dexterity" => vec![(strength, 1.0), (dexterity, 1.0)],
+        " to Strength and Intelligence" => vec![(strength, 1.0), (intelligence, 1.0)],
+        " to Dexterity and Intelligence" => vec![(dexterity, 1.0), (intelligence, 1.0)],
+        _ => Vec::new(),
+    }
+}
+
+/// Whether a mod adds to an armour piece's own defences, which the search
+/// covers through the item's armour, evasion and energy shield.
+fn local_defence(text: &str) -> bool {
+    let defences = [
+        "Armour",
+        "Evasion Rating",
+        "maximum Energy Shield",
+        "Energy Shield",
+        "Armour and Evasion",
+        "Armour and Energy Shield",
+        "Evasion and Energy Shield",
+        "Armour, Evasion and Energy Shield",
+    ];
+    let flat =
+        text.starts_with('+') && defences.iter().any(|d| text.ends_with(&format!(" to {d}")));
+    let increased = defences
+        .iter()
+        .any(|d| text.ends_with(&format!("% increased {d}")));
+    flat || increased
+}
+
+/// The stats a price check searches for: the item's mods, with those that add
+/// to resistance, life, mana and attribute totals folded into the totals, and
+/// an armour piece's defence mods left to its defence values. Requiring each
+/// mod on its own finds only items at least as good in every one, which are
+/// few and dearer.
+pub fn searched_stats(item: &PriceItem) -> Vec<PriceMod> {
+    let armour = !item.defences.is_empty();
+    let mut totals = [0.0; TOTALS.len()];
+    let mut stats = Vec::new();
+
+    for m in &item.mods {
+        // An aggregated mod reads "A, B"; its parts are the same stat.
+        let first = m.text.split(", ").next().unwrap_or(&m.text);
+        let folds = totals_of(first);
+
+        if armour && local_defence(first) {
+            continue;
+        }
+
+        match m.value {
+            Some(value) if !folds.is_empty() && !m.invert && !m.option => {
+                for (total, times) in folds {
+                    totals[total] += value * times;
+                }
+            }
+            _ => stats.push(m.clone()),
+        }
+    }
+
+    for (index, total) in totals.iter().enumerate() {
+        if *total > 0.0 {
+            let (id, label) = TOTALS[index];
+            stats.push(PriceMod {
+                text: format!("+{total}{label}"),
+                ids: vec![id.into()],
+                value: Some(*total),
+                invert: false,
+                option: false,
+            });
+        }
+    }
+
+    stats
+}
+
 /// The search for listings like the item, cheapest first: a unique by name,
-/// anything else by category, defences and `required` of its mods, each at
-/// `1 - tolerance` of its value or more.
-pub fn query(item: &PriceItem, status: &str, tolerance: f64, required: usize) -> Value {
+/// anything else by category, defences and `required` of the searched stats,
+/// each at `1 - tolerance` of its value or more.
+pub fn query(
+    item: &PriceItem,
+    stats: &[PriceMod],
+    status: &str,
+    tolerance: f64,
+    required: usize,
+) -> Value {
     let mut query = json!({
         "query": { "status": { "option": status }, "stats": [], "filters": {} },
         "sort": { "price": "asc" },
@@ -66,11 +193,11 @@ pub fn query(item: &PriceItem, status: &str, tolerance: f64, required: usize) ->
             json!({ "min": (value * (1.0 - tolerance)).floor() });
     }
 
+    let searched = stats;
     let stats = q["stats"].as_array_mut().expect("stats is an array");
 
-    if required == item.mods.len() {
-        let single: Vec<Value> = item
-            .mods
+    if required == searched.len() {
+        let single: Vec<Value> = searched
             .iter()
             .filter(|m| m.ids.len() == 1)
             .map(|m| stat_filter(m, &m.ids[0], tolerance))
@@ -81,7 +208,7 @@ pub fn query(item: &PriceItem, status: &str, tolerance: f64, required: usize) ->
         }
 
         // A text matching several trade stats needs any one of them.
-        for m in item.mods.iter().filter(|m| m.ids.len() > 1) {
+        for m in searched.iter().filter(|m| m.ids.len() > 1) {
             let filters: Vec<Value> = m
                 .ids
                 .iter()
@@ -90,8 +217,7 @@ pub fn query(item: &PriceItem, status: &str, tolerance: f64, required: usize) ->
             stats.push(json!({ "type": "count", "value": { "min": 1 }, "filters": filters }));
         }
     } else {
-        let filters: Vec<Value> = item
-            .mods
+        let filters: Vec<Value> = searched
             .iter()
             .flat_map(|m| m.ids.iter().map(move |id| stat_filter(m, id, tolerance)))
             .collect();
@@ -225,7 +351,9 @@ pub fn estimate(offers: &[Offer]) -> Option<f64> {
 #[serde(rename_all = "camelCase")]
 pub struct PriceCheck {
     pub item: PriceItem,
-    /// How many of its mods the listings have, at the tolerance or better.
+    /// The stats searched for, from its mods.
+    pub searched: Vec<PriceMod>,
+    /// How many of them the listings have, at the tolerance or better.
     pub required: usize,
     pub tolerance: f64,
     pub total: Option<u64>,
@@ -248,10 +376,16 @@ pub fn check(
     tolerance: f64,
     fetch: usize,
 ) -> Result<PriceCheck> {
+    let searched = if item.unique {
+        Vec::new()
+    } else {
+        searched_stats(&item)
+    };
     let mut found = None;
 
-    for required in required_steps(item.mods.len()) {
-        let result = client.search(league, &query(&item, status, tolerance, required))?;
+    for required in required_steps(searched.len()) {
+        let query = query(&item, &searched, status, tolerance, required);
+        let result = client.search(league, &query)?;
         let enough = result.total.unwrap_or(result.result.len() as u64) >= ENOUGH_LISTINGS;
         found = Some((required, result));
 
@@ -278,6 +412,7 @@ pub fn check(
         estimate: estimate(&offers),
         ninja: None,
         item,
+        searched,
         required,
         tolerance,
         offers,
@@ -343,7 +478,7 @@ mod tests {
 
     #[test]
     fn requires_every_mod_first() {
-        let q = query(&item(), "available", 0.1, 4);
+        let q = query(&item(), &item().mods, "available", 0.1, 4);
 
         assert_eq!(q["sort"], json!({ "price": "asc" }));
         assert_eq!(
@@ -363,7 +498,7 @@ mod tests {
 
     #[test]
     fn then_counts_how_many_match() {
-        let q = query(&item(), "available", 0.1, 3);
+        let q = query(&item(), &item().mods, "available", 0.1, 3);
         let stats = q["query"]["stats"].as_array().unwrap();
 
         assert_eq!(stats.len(), 1);
@@ -373,13 +508,59 @@ mod tests {
     }
 
     #[test]
+    fn folds_mods_into_totals_and_defences() {
+        let m = |text: &str, value: f64| PriceMod {
+            text: text.into(),
+            ids: vec![format!("explicit.{text}")],
+            value: Some(value),
+            invert: false,
+            option: false,
+        };
+        let mut armour = item();
+        armour.mods = vec![
+            m("5% increased Movement Speed", 5.0),
+            m("+133 to Evasion Rating, +5 to Evasion Rating", 138.0),
+            m("+41 to maximum Energy Shield", 41.0),
+            m("76% increased Evasion and Energy Shield", 76.0),
+            m("+16 to Dexterity", 16.0),
+            m("+21% to Fire Resistance", 21.0),
+            m("+37% to Lightning Resistance", 37.0),
+            m("+10% to all Elemental Resistances", 10.0),
+            m("+5 to all Attributes", 5.0),
+        ];
+
+        let texts: Vec<String> = searched_stats(&armour)
+            .into_iter()
+            .map(|s| s.text)
+            .collect();
+        assert_eq!(
+            texts,
+            [
+                "5% increased Movement Speed",
+                "+88% total Elemental Resistance",
+                "+5 total to Strength",
+                "+21 total to Dexterity",
+                "+5 total to Intelligence",
+            ]
+        );
+
+        // Without defences of its own, an item's defence mods are searched.
+        armour.defences.clear();
+        assert!(
+            searched_stats(&armour)
+                .iter()
+                .any(|s| s.text.contains("Evasion Rating"))
+        );
+    }
+
+    #[test]
     fn searches_uniques_by_name() {
         let mut unique = item();
         unique.unique = true;
         unique.name = "Atziri's Step".into();
         unique.base = "Cinched Boots".into();
         unique.trade_base = Some("Cinched Boots".into());
-        let q = query(&unique, "available", 0.1, 0);
+        let q = query(&unique, &[], "available", 0.1, 0);
 
         assert_eq!(q["query"]["name"], "Atziri's Step");
         assert_eq!(q["query"]["type"], "Cinched Boots");
