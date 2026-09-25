@@ -28,7 +28,9 @@ without reinstalling. `~/.claude/skills` is not an exact directory in chezmoi,
 so chezmoi leaves the link alone.
 
 The first calculation downloads the pinned PoB release (about 390 MB, 65 MB
-unpacked) into `~/.local/share/poe2/pob/<version>`.
+unpacked) into `poe2/pob/<version>` under the local data directory:
+`~/.local/share` on Linux, `~/Library/Application Support` on macOS,
+`%LOCALAPPDATA%` on Windows.
 
 ## Usage
 
