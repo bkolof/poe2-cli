@@ -148,7 +148,30 @@ EOF
 ```
 
 Without `--slot`, the item is compared in every slot it fits (both rings, for
-example).
+example), including the weapon swap set when it has a weapon. Name a slot such
+as `Weapon 1 Swap` to compare there anyway; a swap slot is compared with that
+set active. Charms are compared only in the charm slots the build has.
+
+A jewel can go into a socket that is not allocated yet by allocating it in the
+same command: `--allocate 21984 --slot "Jewel 21984"`. Find a nearby socket
+with `whatif BUILD --allocate "Jewel Socket"`, which names the closest one.
+
+#### Screenshots
+
+When the user shares a screenshot of an item tooltip instead of its text:
+
+1. Transcribe it into Ctrl+C item text: `Item Class`, `Rarity`, the name and
+   base on their own lines, then every mod line exactly as shown, with its
+   numbers. Keep implicit, rune and enchant lines, and `Corrupted` if shown.
+2. Show the transcription to the user and ask them to check it before
+   running anything. Digits in screenshots are easy to misread, and one wrong
+   number changes the result.
+3. Run `whatif` with the confirmed text. If PoB does not recognise the item,
+   the base name is usually wrong; check it with `poe2 uniques` or
+   `poe2 mods --base`.
+
+Say that the numbers come from a transcription. Ctrl+C text, when the user can
+copy it, is always more reliable.
 
 ## Reading the results
 
