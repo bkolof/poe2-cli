@@ -40,7 +40,7 @@ local function compare(baseOutput, output)
 						before = formatStat(statData.fmt, old * scale),
 						after = formatStat(statData.fmt, new * scale),
 						diff = formatStat(statData.fmt, diff * scale, true),
-						percent = old ~= 0 and (new / old * 100 - 100) or nil,
+						percent = statData.compPercent and old ~= 0 and (new / old * 100 - 100) or nil,
 						better = (statData.lowerIsBetter and diff < 0) or (not statData.lowerIsBetter and diff > 0),
 					})
 				end
@@ -87,30 +87,64 @@ local function findSlot(name)
 end
 
 -- A passive by node id or name. Several passives can share a name, so a name
--- resolves to the allocated one (to unallocate) or the nearest unallocated one.
+-- resolves to the allocated one (to unallocate) or the nearest reachable one.
+-- Allocating needs a path from the tree, and ascendancy passives must belong
+-- to the build's ascendancy, as in PoB itself.
 local function findNode(name, allocated)
-	local byId = tonumber(name) and build.spec.nodes[tonumber(name)]
+	local ascendancy = build.spec.curAscendClassName
 
-	if byId then
-		return byId
+	local function usable(node)
+		if (node.alloc or false) ~= allocated then
+			return false
+		end
+
+		if allocated then
+			return true
+		end
+
+		return node.path ~= nil and (not node.ascendancyName or node.ascendancyName == ascendancy)
 	end
 
-	local wanted = name:lower()
+	local byId = tonumber(name) and build.spec.nodes[tonumber(name)]
+	local candidates = {}
+
+	if byId then
+		candidates = { byId }
+	else
+		for _, node in pairs(build.spec.nodes) do
+			if node.dn and node.dn:lower() == name:lower() then
+				table.insert(candidates, node)
+			end
+		end
+	end
+
+	if #candidates == 0 then
+		error("no passive named '" .. name .. "'", 0)
+	end
+
 	local found
 
-	for _, node in pairs(build.spec.nodes) do
-		local candidate = node.dn and node.dn:lower() == wanted and (node.alloc or false) == allocated
-
-		if candidate and (not found or (node.pathDist or math.huge) < (found.pathDist or math.huge)) then
+	for _, node in ipairs(candidates) do
+		if usable(node) and (not found or (node.pathDist or math.huge) < (found.pathDist or math.huge)) then
 			found = node
 		end
 	end
 
-	if not found then
-		error("no " .. (allocated and "allocated" or "unallocated") .. " passive named '" .. name .. "'", 0)
+	if found then
+		return found
 	end
 
-	return found
+	local node = candidates[1]
+
+	if allocated then
+		error("'" .. node.dn .. "' is not allocated", 0)
+	elseif node.alloc then
+		error("'" .. node.dn .. "' is already allocated", 0)
+	elseif node.ascendancyName and node.ascendancyName ~= ascendancy then
+		error("'" .. node.dn .. "' belongs to the " .. node.ascendancyName .. " ascendancy", 0)
+	end
+
+	error("'" .. node.dn .. "' cannot be reached from the allocated passives", 0)
 end
 
 -- The raw-code download URL for a link to a build site PoB knows (pobb.in,
@@ -201,16 +235,22 @@ function poe2.skills()
 			recalculate()
 			local output = build.calcsTab.mainOutput
 
+			local source = group.source
+
 			table.insert(skills, {
 				name = activeSkill.activeEffect.grantedEffect.name,
 				group = group.displayLabel,
 				slot = group.slot,
+				grantedBy = source and ((source:match("^Tree") and "passive tree") or (source:match("^Item") and "item") or source:lower()),
 				main = groupIndex == mainGroup and skillIndex == (mainActive or 1),
+				-- PoB rates some skills (cooldowns, combos) by damage per use;
+				-- their CombinedDPS is then that damage, not a rate.
+				perUse = activeSkill.skillData.showAverage and true or false,
 				combinedDps = output.CombinedDPS or 0,
 				hitDps = output.TotalDPS or 0,
 				dotDps = output.TotalDotDPS or 0,
 				minionDps = output.Minion and output.Minion.CombinedDPS or 0,
-				averageHit = output.AverageHit or 0,
+				averageDamage = output.AverageHit or output.AverageDamage or 0,
 				speed = output.Speed or 0,
 			})
 		end
@@ -229,23 +269,35 @@ end
 function poe2.whatIf(request)
 	local override = {}
 	local points = { added = 0, removed = 0 }
+	local passives = {}
+
+	local function describe(node, action, count)
+		table.insert(passives, {
+			id = node.id,
+			name = node.dn,
+			action = action,
+			ascendancy = node.ascendancyName,
+			points = count,
+		})
+	end
 
 	if request.allocate and #request.allocate > 0 then
 		override.addNodes = {}
 
 		for _, name in ipairs(request.allocate) do
 			local node = findNode(name, false)
+			local count = 0
 
-			if node.alloc then
-				error("'" .. node.dn .. "' is already allocated", 0)
-			end
-
-			for _, pathNode in ipairs(node.path or { node }) do
-				if not override.addNodes[pathNode] then
+			-- A path can run through passives that are already allocated.
+			for _, pathNode in ipairs(node.path) do
+				if not pathNode.alloc and not override.addNodes[pathNode] then
 					override.addNodes[pathNode] = true
-					points.added = points.added + 1
+					count = count + 1
 				end
 			end
+
+			points.added = points.added + count
+			describe(node, "allocate", count)
 		end
 	end
 
@@ -254,24 +306,24 @@ function poe2.whatIf(request)
 
 		for _, name in ipairs(request.unallocate) do
 			local node = findNode(name, true)
-
-			if not node.alloc then
-				error("'" .. node.dn .. "' is not allocated", 0)
-			end
+			local count = 0
 
 			for _, dependent in ipairs(node.depends or { node }) do
 				if not override.removeNodes[dependent] then
 					override.removeNodes[dependent] = true
-					points.removed = points.removed + 1
+					count = count + 1
 				end
 			end
+
+			points.removed = points.removed + count
+			describe(node, "unallocate", count)
 		end
 	end
 
 	local calcFunc, baseOutput = build.calcsTab:GetMiscCalculator()
 
 	if not request.item then
-		return { points = points, results = { { changes = compare(baseOutput, calcFunc(override)) } } }
+		return { points = points, passives = passives, results = { { changes = compare(baseOutput, calcFunc(override)) } } }
 	end
 
 	local item = new("Item", request.item)
@@ -307,7 +359,7 @@ function poe2.whatIf(request)
 	end
 
 	table.sort(results, function(a, b) return a.slot < b.slot end)
-	return { item = item.name, points = points, results = results }
+	return { item = item.name, points = points, passives = passives, results = results }
 end
 
 -- The impact of every unallocated passive within reach, including the path
@@ -357,9 +409,14 @@ function poe2.slotUpgrades(slotName)
 		error("nothing is equipped in " .. name, 0)
 	end
 
-	if item.rarity == "UNIQUE" or item.rarity == "RELIC" then
-		error(item.name .. " in " .. name .. " is unique, so its mods cannot change; compare replacements with whatif", 0)
+	if item.rarity ~= "MAGIC" and item.rarity ~= "RARE" then
+		error(item.name .. " in " .. name .. " is " .. item.rarity:lower() .. "; upgrades works on magic and rare items", 0)
 	end
+
+	-- The mod pool and affix limits PoB uses for this kind of item.
+	local modPools = { Jewel = data.itemMods.Jewel, Flask = data.itemMods.Flask, Charm = data.itemMods.Charm }
+	local modPool = modPools[item.type] or data.itemMods.Item
+	local limit = item.rarity == "MAGIC" and 1 or (item.type == "Jewel" and 2 or 3)
 
 	local itemLevel = item.itemLevel or 100
 	local existing = {}
@@ -385,7 +442,7 @@ function poe2.slotUpgrades(slotName)
 	local rollable = {}
 	local used = { Prefix = {}, Suffix = {} }
 
-	for modId, mod in pairs(data.itemMods.Item) do
+	for modId, mod in pairs(modPool) do
 		local affix = mod.type == "Prefix" or mod.type == "Suffix"
 
 		if affix and item:GetModSpawnWeight(mod) > 0 then
@@ -420,7 +477,7 @@ function poe2.slotUpgrades(slotName)
 			count = count + 1
 		end
 
-		free[affix] = math.max(0, 3 - count)
+		free[affix] = math.max(0, limit - count)
 	end
 
 	local calcFunc, baseOutput = build.calcsTab:GetMiscCalculator()

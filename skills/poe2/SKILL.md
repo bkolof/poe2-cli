@@ -76,12 +76,21 @@ example).
   middle roll, and shows the item's free prefixes and suffixes (recognised from
   its mod text). Mods marked "needs a free slot" mean replacing a mod, so check
   with `whatif` against the item as it would be.
-- `skills` calculates each skill as if it were the main skill. DPS in `stats`,
+- `skills` calculates each skill as if it were the main skill. PoB rates some
+  skills (cooldowns, combos) by damage per use rather than per second; those
+  show "per use" and must not be compared with DPS figures. DPS in `stats`,
   `whatif`, `tree` and `upgrades` is for the main skill only; say so.
 - With `--json`, extract what you need with `jq` rather than reading it all:
   `poe2 stats BUILD --json | jq '.stats | {Life, EnergyShield, TotalEHP}'`.
 
 ## Caveats
+
+- `whatif` names the passives it resolved (with node ids and points); check
+  they are the ones the user meant. Passives on paths that grant "+5 to any
+  Attribute" count as worth nothing until allocated, so paths through them look
+  slightly worse than they are.
+- The free affixes in `upgrades` are recognised from mod text, so treat them as
+  a good guess, especially with essence, desecrated or hybrid mods.
 
 - Numbers use the PoB configuration saved with the build (enemy type, buffs,
   charges, flask uptime). poe.ninja builds use poe.ninja's defaults.

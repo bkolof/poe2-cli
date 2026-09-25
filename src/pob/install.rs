@@ -2,6 +2,7 @@
 
 use std::fs;
 use std::path::{Component, Path, PathBuf};
+use std::time::Duration;
 
 use anyhow::{Context, Result, bail};
 use flate2::read::GzDecoder;
@@ -32,7 +33,14 @@ pub fn ensure_installed() -> Result<PathBuf> {
     let url = format!(
         "https://github.com/PathOfBuildingCommunity/PathOfBuilding-PoE2/archive/refs/tags/{VERSION}.tar.gz"
     );
-    let response = ureq::get(&url)
+    // The download itself can take a while, so only its start is time-limited.
+    let agent: ureq::Agent = ureq::Agent::config_builder()
+        .timeout_connect(Some(Duration::from_secs(30)))
+        .timeout_recv_response(Some(Duration::from_secs(60)))
+        .build()
+        .into();
+    let response = agent
+        .get(&url)
         .call()
         .with_context(|| format!("downloading {url}"))?;
     unpack(response.into_body().into_reader(), &staging)?;

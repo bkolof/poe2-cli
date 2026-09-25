@@ -3,7 +3,7 @@
 use poe2::ninja::{Character, CharacterSummary};
 use poe2::pob::model::{
     BuildInfo, GemInfo, Impact, ModInfo, SidebarRow, SkillDps, SlotUpgrades, TreeSuggestion,
-    UniqueInfo, WhatIf, WhatIfRequest,
+    UniqueInfo, WhatIf,
 };
 
 use crate::Rank;
@@ -33,26 +33,41 @@ pub fn sidebar(rows: &[SidebarRow]) {
 }
 
 pub fn skills(mut skills: Vec<SkillDps>) {
-    skills.sort_by(|a, b| total_dps(b).total_cmp(&total_dps(a)));
+    // Per-use skills have no comparable rate, so they sort after the others.
+    skills.sort_by(|a, b| {
+        a.per_use
+            .cmp(&b.per_use)
+            .then(total_dps(b).total_cmp(&total_dps(a)))
+    });
     println!(
-        "  {:<28}{:>12}{:>12}{:>12}{:>9}",
-        "Skill", "DPS", "Hit DPS", "DoT DPS", "Speed"
+        "  {:<32}{:>12}{:>12}{:>10}{:>12}{:>9}",
+        "Skill", "DPS", "Hit DPS", "DoT DPS", "Avg damage", "Speed"
     );
 
     for skill in &skills {
         let marker = if skill.main { "*" } else { " " };
-        let dps = if skill.minion_dps > 0.0 {
-            format!("{} (minions)", thousands(skill.minion_dps))
+        let name = match &skill.granted_by {
+            Some(source) => format!("{} ({source})", skill.name),
+            None => skill.name.clone(),
+        };
+        let (dps, hit_dps) = if skill.per_use {
+            ("per use".to_string(), "-".to_string())
+        } else if skill.minion_dps > 0.0 {
+            (
+                format!("{} (minions)", thousands(skill.minion_dps)),
+                "-".to_string(),
+            )
         } else {
-            thousands_or_dash(skill.combined_dps)
+            (
+                thousands_or_dash(skill.combined_dps),
+                thousands_or_dash(skill.hit_dps),
+            )
         };
 
         println!(
-            "{marker} {:<28}{:>12}{:>12}{:>12}{:>9}",
-            skill.name,
-            dps,
-            thousands_or_dash(skill.hit_dps),
+            "{marker} {name:<32}{dps:>12}{hit_dps:>12}{:>10}{:>12}{:>9}",
             thousands_or_dash(skill.dot_dps),
+            thousands_or_dash(skill.average_damage),
             if skill.speed > 0.0 {
                 format!("{:.2}/s", skill.speed)
             } else {
@@ -62,26 +77,37 @@ pub fn skills(mut skills: Vec<SkillDps>) {
     }
 
     println!("\n* main skill in the build");
+
+    if skills.iter().any(|s| s.per_use) {
+        println!(
+            "per use: PoB rates this skill by its damage per use (Avg damage), not per second"
+        );
+    }
 }
 
-pub fn what_if(request: &WhatIfRequest, result: &WhatIf) {
-    let mut passives = Vec::new();
-
-    if !request.allocate.is_empty() {
-        passives.push(format!(
-            "allocating {} ({})",
-            request.allocate.join(", "),
-            plural(result.points.added, "point")
-        ));
-    }
-
-    if !request.unallocate.is_empty() {
-        passives.push(format!(
-            "unallocating {} ({})",
-            request.unallocate.join(", "),
-            plural(result.points.removed, "point")
-        ));
-    }
+pub fn what_if(result: &WhatIf) {
+    let passives: Vec<String> = result
+        .passives
+        .iter()
+        .map(|p| {
+            let ascendancy = p
+                .ascendancy
+                .as_ref()
+                .map(|a| format!("{a} "))
+                .unwrap_or_default();
+            let verb = if p.action == "allocate" {
+                "allocating"
+            } else {
+                "unallocating"
+            };
+            format!(
+                "{verb} {} ({ascendancy}id {}, {})",
+                p.name,
+                p.id,
+                plural(p.points, "point")
+            )
+        })
+        .collect();
 
     for (i, entry) in result.results.iter().enumerate() {
         if i > 0 {

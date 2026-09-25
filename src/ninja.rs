@@ -137,7 +137,8 @@ pub fn fetch_character(character: &CharacterRef) -> Result<Character> {
     Ok(model.char_model)
 }
 
-fn agent() -> ureq::Agent {
+/// An HTTP agent that gives up on stalled requests.
+pub fn agent() -> ureq::Agent {
     ureq::Agent::config_builder()
         .timeout_global(Some(Duration::from_secs(15)))
         .build()
@@ -151,7 +152,10 @@ fn read_sse_version(agent: &ureq::Agent, url: &str) -> Result<Option<u64>> {
         version: u64,
     }
 
-    let response = agent.get(url).call()?;
+    let response = agent
+        .get(url)
+        .call()
+        .with_context(|| format!("requesting {url}"))?;
     let reader = BufReader::new(response.into_body().into_reader());
 
     for line in reader.lines() {

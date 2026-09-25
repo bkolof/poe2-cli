@@ -109,6 +109,8 @@ fn analyses_a_build() {
         .expect("allocating Imbibed Power changes DPS");
     assert!(total_dps.better);
     assert!(allocate.points.added > 1, "the path is included");
+    assert_eq!(allocate.passives[0].name, "Imbibed Power");
+    assert_eq!(allocate.passives[0].points, allocate.points.added);
 
     let missing = pob.what_if(&WhatIfRequest {
         allocate: vec!["No Such Passive".into()],
@@ -116,7 +118,19 @@ fn analyses_a_build() {
     });
     assert_eq!(
         missing.unwrap_err().to_string(),
-        "no unallocated passive named 'No Such Passive'"
+        "no passive named 'No Such Passive'"
+    );
+
+    // 51690 is a Titan passive; this build is a Martial Artist.
+    let other_ascendancy = pob.what_if(&WhatIfRequest {
+        allocate: vec!["51690".into()],
+        ..Default::default()
+    });
+    assert!(
+        other_ascendancy
+            .unwrap_err()
+            .to_string()
+            .contains("belongs to the Titan ascendancy")
     );
 
     let suggestions = pob.tree_suggestions(2).unwrap();

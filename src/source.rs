@@ -57,6 +57,10 @@ impl Source {
             return Ok(Self::Text(text));
         }
 
+        if looks_like_path(arg) {
+            bail!("no such file: {arg}");
+        }
+
         if let Some((account, character)) = arg.split_once('/')
             && !account.is_empty()
             && !character.is_empty()
@@ -92,7 +96,8 @@ impl Source {
                          use a poe.ninja profile, a build site PoB can import from, or a build code"
                     );
                 };
-                let text = ureq::get(&url)
+                let text = ninja::agent()
+                    .get(&url)
                     .call()
                     .with_context(|| format!("downloading {url}"))?
                     .body_mut()
@@ -104,6 +109,16 @@ impl Source {
             }
         }
     }
+}
+
+/// Paths the user meant as files, as opposed to `account/character` or a
+/// build code: relative or absolute paths, or a name with a file extension.
+fn looks_like_path(arg: &str) -> bool {
+    let has_extension = Path::new(arg).extension().is_some_and(|e| {
+        (1..=4).contains(&e.len()) && e.to_string_lossy().chars().all(char::is_alphanumeric)
+    });
+
+    arg.starts_with(['.', '/', '~']) || arg.contains('\\') || has_extension
 }
 
 fn from_ninja(reference: &CharacterRef) -> Result<LoadedBuild> {
@@ -148,6 +163,14 @@ mod tests {
             Source::read(" eNrtPW1z2 ").unwrap(),
             Source::Text("eNrtPW1z2".into())
         );
+    }
+
+    #[test]
+    fn reports_missing_files() {
+        for arg in ["./nope.pob", "builds/nope.xml", "/tmp/nope", "nope.txt"] {
+            let error = Source::read(arg).unwrap_err().to_string();
+            assert_eq!(error, format!("no such file: {arg}"));
+        }
     }
 
     #[test]

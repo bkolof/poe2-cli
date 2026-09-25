@@ -24,12 +24,17 @@ pub struct SkillDps {
     pub name: String,
     pub group: Option<String>,
     pub slot: Option<String>,
+    /// "passive tree" or "item" when the skill is not from a gem.
+    pub granted_by: Option<String>,
     pub main: bool,
+    /// PoB rates this skill by damage per use, so `combined_dps` is that
+    /// damage rather than a rate.
+    pub per_use: bool,
     pub combined_dps: f64,
     pub hit_dps: f64,
     pub dot_dps: f64,
     pub minion_dps: f64,
-    pub average_hit: f64,
+    pub average_damage: f64,
     pub speed: f64,
 }
 
@@ -48,7 +53,21 @@ pub struct WhatIf {
     pub item: Option<String>,
     /// Passive points allocated (paths included) and unallocated (dependents included).
     pub points: PassivePoints,
+    /// The passives the requested names or ids resolved to.
+    #[serde(default)]
+    pub passives: Vec<ResolvedPassive>,
     pub results: Vec<WhatIfResult>,
+}
+
+#[derive(Debug, Deserialize, Serialize)]
+pub struct ResolvedPassive {
+    pub id: u32,
+    pub name: String,
+    /// "allocate" or "unallocate".
+    pub action: String,
+    pub ascendancy: Option<String>,
+    /// Points this passive adds (its path) or removes (its dependents).
+    pub points: u32,
 }
 
 #[derive(Debug, Deserialize, Serialize)]

@@ -156,6 +156,10 @@ fn main() -> Result<()> {
             allocate,
             unallocate,
         } => {
+            if build == "-" && item.as_deref() == Some("-") {
+                anyhow::bail!("the build and the item cannot both come from stdin");
+            }
+
             let item = item.map(|path| read_input(&path)).transpose()?;
             let request = WhatIfRequest {
                 item,
@@ -178,7 +182,7 @@ fn main() -> Result<()> {
                 return print_json(&result);
             }
 
-            report::what_if(&request, &result);
+            report::what_if(&result);
         }
         Command::Tree {
             build,
