@@ -11,6 +11,10 @@ use crate::pob::model::{PriceItem, PriceMod};
 
 /// Enough listings to price from; with fewer, the search relaxes.
 pub const ENOUGH_LISTINGS: u64 = 10;
+/// How many of the cheapest listings the estimate is the median of. Asking
+/// prices above the cheapest few are often far above what items sell for,
+/// especially where few listings match.
+pub const ESTIMATE_FROM: usize = 5;
 /// Searches per item at most, one per step of relaxation.
 const MAX_SEARCHES: usize = 4;
 
@@ -196,20 +200,17 @@ pub fn offers(bodies: &[String], rates: &Rates) -> Result<Vec<Offer>> {
     Ok(offers)
 }
 
-/// The median of the cheapest offers poe.ninja can price, so that one
+/// The median of the cheapest few offers poe.ninja can price, so that one
 /// unusually cheap listing does not set the price.
 pub fn estimate(offers: &[Offer]) -> Option<f64> {
-    let mut prices: Vec<f64> = offers
-        .iter()
-        .filter_map(|o| o.divines)
-        .take(ENOUGH_LISTINGS as usize)
-        .collect();
+    let mut prices: Vec<f64> = offers.iter().filter_map(|o| o.divines).collect();
 
     if prices.is_empty() {
         return None;
     }
 
     prices.sort_by(f64::total_cmp);
+    prices.truncate(ESTIMATE_FROM);
     let middle = prices.len() / 2;
 
     if prices.len().is_multiple_of(2) {
@@ -261,11 +262,16 @@ pub fn check(
 
     let (required, result) = found.expect("there is always a first search");
     let ids: Vec<String> = result.result.iter().take(fetch).cloned().collect();
-    let offers = if ids.is_empty() {
+    let mut offers = if ids.is_empty() {
         Vec::new()
     } else {
         offers(&client.fetch(&result.id, &ids)?, rates)?
     };
+    // The site sorts by its own exchange rates; these are poe.ninja's.
+    offers.sort_by(|a, b| {
+        let price = |o: &Offer| o.divines.unwrap_or(f64::INFINITY);
+        price(a).total_cmp(&price(b))
+    });
     Ok(PriceCheck {
         url: search_url(league, &result.id),
         total: result.total,
@@ -414,5 +420,19 @@ mod tests {
         assert_eq!(offers[0].name, "Quickslip Shoes");
         assert_eq!(estimate(&offers), Some(0.2));
         assert_eq!(estimate(&[]), None);
+
+        // A thin market's high asks do not pull the estimate up.
+        let asks: Vec<Offer> = [70.0, 1.0, 45.0, 2.0, 1.0, 24.0, 3.0, 15.0, 2.0, 5.0]
+            .iter()
+            .map(|&divines| Offer {
+                name: String::new(),
+                amount: divines,
+                currency: "divine".into(),
+                divines: Some(divines),
+                seller: None,
+                indexed: None,
+            })
+            .collect();
+        assert_eq!(estimate(&asks), Some(2.0));
     }
 }

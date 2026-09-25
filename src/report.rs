@@ -10,7 +10,7 @@ use crate::Rank;
 use crate::shop::{PricedListing, PricedUnique, SlotSearch};
 use poe2::market::Rates;
 use poe2::pob::model::TradeStat;
-use poe2::trade::price::{ENOUGH_LISTINGS, Offer, PriceCheck};
+use poe2::trade::price::{ENOUGH_LISTINGS, ESTIMATE_FROM, Offer, PriceCheck};
 
 pub fn header(info: &BuildInfo, character: Option<&Character>) {
     let class = info.ascendancy.as_deref().unwrap_or(&info.class);
@@ -610,7 +610,7 @@ fn price_check(check: &PriceCheck, league: &str, rates: &Rates) {
                 .iter()
                 .filter(|o| o.divines.is_some())
                 .count()
-                .min(ENOUGH_LISTINGS as usize)
+                .min(ESTIMATE_FROM)
         ),
         None => println!("No priced listings to estimate from."),
     }

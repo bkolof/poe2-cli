@@ -128,7 +128,11 @@ shown too. Anything else is searched by its category, its defences and its
 mods, each within `--tolerance` percent of the item's value (default 10). When
 fewer than 10 listings have every mod, it searches again for listings with
 any N of them, one fewer each time, down to half. The estimate is the median of
-the cheapest 10 listings, so a single fake cheap listing does not set it.
+the cheapest 5 listings: a single fake cheap listing does not set it, and the
+high asks of a thin market do not pull it up.
+
+- Estimates are asking prices for gear like the user's, not what they spent:
+  self-found gear counts at market value, and items sell below their asks.
 
 - Say how many mods the listings had to match; an estimate from a relaxed
   search, or from few listings, is rough.
