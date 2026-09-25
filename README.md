@@ -16,6 +16,17 @@ mise install
 cargo build --release
 ```
 
+To put `poe2` on PATH and give Claude Code the skill in `skills/poe2`:
+
+```sh
+cargo install --path . --root ~/.local                  # ~/.local/bin/poe2
+ln -sfn "$PWD/skills/poe2" ~/.claude/skills/poe2
+```
+
+The symlink keeps the skill versioned with the CLI, and edits take effect
+without reinstalling. `~/.claude/skills` is not an exact directory in chezmoi,
+so chezmoi leaves the link alone.
+
 The first calculation downloads the pinned PoB release (about 390 MB, 65 MB
 unpacked) into `~/.local/share/poe2/pob/<version>`.
 
