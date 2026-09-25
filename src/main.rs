@@ -484,8 +484,12 @@ fn trade_command(command: TradeCommand, json: bool) -> Result<()> {
             })?;
             let ids: Vec<String> = search.result.iter().take(fetch).cloned().collect();
             let bodies = client.fetch(&search.id, &ids)?;
-            let listings =
-                shop::rank_listings(pob.evaluate_listings(&query.slot, &bodies)?, &rates, by);
+            let listings = shop::rank_listings(
+                pob.evaluate_listings(&query.slot, &bodies)?,
+                &rates,
+                budget,
+                by,
+            );
             let url = trade::search_url(&league, &search.id);
 
             if open {

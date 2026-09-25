@@ -88,8 +88,15 @@ pub struct PricedListing {
 
 /// Price the listings and mark the best value ones: going up in price, each
 /// must beat every cheaper listing. Listings the character cannot wear, and
-/// ones that do not improve the build, are never best value.
-pub fn rank_listings(listings: Vec<Listing>, rates: &Rates, by: Rank) -> Vec<PricedListing> {
+/// ones that do not improve the build, are never best value. The trade site
+/// converts prices at its own rates, so listings over the budget at
+/// poe.ninja's rates are left out here.
+pub fn rank_listings(
+    listings: Vec<Listing>,
+    rates: &Rates,
+    budget: Option<f64>,
+    by: Rank,
+) -> Vec<PricedListing> {
     let mut priced: Vec<PricedListing> = listings
         .into_iter()
         .map(|listing| PricedListing {
@@ -100,6 +107,11 @@ pub fn rank_listings(listings: Vec<Listing>, rates: &Rates, by: Rank) -> Vec<Pri
             score: score(&listing.impact, by),
             best_value: false,
             listing,
+        })
+        .filter(|l| match (budget, l.divines) {
+            (Some(budget), Some(price)) => price <= budget,
+            (Some(_), None) => false,
+            (None, _) => true,
         })
         .collect();
 
@@ -165,9 +177,10 @@ mod tests {
             listing("better", 50.0, 5.0, true),
             listing("unwearable", 5.0, 9.0, false),
             listing("downgrade", 1.0, -3.0, true),
+            listing("over budget", 80.0, 9.0, true),
         ];
 
-        let ranked = rank_listings(listings, &rates, Rank::Dps);
+        let ranked = rank_listings(listings, &rates, Some(0.6), Rank::Dps);
 
         let best: Vec<&str> = ranked
             .iter()
