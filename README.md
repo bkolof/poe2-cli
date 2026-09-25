@@ -48,14 +48,27 @@ Then ask Claude about your character, for example "what should I upgrade on
 
 ### Codex
 
-The same skill works in Codex (CLI, IDE and desktop app). Ask Codex:
+The same skill works in Codex (CLI, IDE and desktop app). Type this into a
+Codex chat, not into a terminal:
 
 ```
 $skill-installer install https://github.com/bkolof/poe2-cli/tree/main/skills/poe2
 ```
 
-Or copy `skills/poe2` from this repo into `~/.agents/skills/poe2`. Codex picks
-up new skills automatically; restart it if the skill does not show up.
+Or install it from a terminal. On Windows, in PowerShell:
+
+```powershell
+$dir = "$HOME\.agents\skills\poe2"; New-Item -ItemType Directory -Force $dir | Out-Null; Invoke-WebRequest https://raw.githubusercontent.com/bkolof/poe2-cli/main/skills/poe2/SKILL.md -OutFile "$dir\SKILL.md"
+```
+
+On macOS and Linux:
+
+```sh
+mkdir -p ~/.agents/skills/poe2 && curl -LsSf https://raw.githubusercontent.com/bkolof/poe2-cli/main/skills/poe2/SKILL.md -o ~/.agents/skills/poe2/SKILL.md
+```
+
+Codex picks up new skills automatically; restart it if the skill does not show
+up.
 
 ### Trade site login
 
