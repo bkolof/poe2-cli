@@ -53,8 +53,9 @@ local checkout links it into the agent's skills directory.
   - PoB reports load errors via `launch.promptMsg`; `poe2.load` turns that
     into an error.
 - Verify changes against the real build, not only the tests:
-  `poe2 stats tests/fixtures/koftespies.pob`, or the live character
-  `'Exile#1234/Koftespies'`.
+  `poe2 stats tests/fixtures/koftespies.pob`, or a live character as
+  `'Account#1234/Character'` (ask the user for theirs; trade and price checks
+  need a live character for its league).
 
 ## Reference
 
