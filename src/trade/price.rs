@@ -106,8 +106,9 @@ fn local_defence(text: &str) -> bool {
     flat || increased
 }
 
-/// Whether a mod adds to an attack weapon's own damage, attack speed or
-/// critical hit chance, which the search covers through its DPS.
+/// Whether a mod adds to an attack weapon's own damage or attack speed, which
+/// the search covers through its DPS. Critical hit chance is not in the DPS
+/// filters, so it is judged like any other mod.
 fn local_weapon(text: &str) -> bool {
     let adds = text.starts_with("Adds ")
         && ["Physical", "Fire", "Cold", "Lightning", "Chaos"]
@@ -117,7 +118,6 @@ fn local_weapon(text: &str) -> bool {
             });
     adds || text.ends_with("% increased Physical Damage")
         || text.ends_with("% increased Attack Speed")
-        || (text.starts_with('+') && text.ends_with("% to Critical Hit Chance"))
 }
 
 /// A mod a price check leaves out, and why.
@@ -248,6 +248,10 @@ pub fn query(
 
         return query;
     }
+
+    // Uniques and other rarities with the same stats are priced differently.
+    q["filters"]["type_filters"]["filters"]["rarity"] =
+        json!({ "option": item.rarity.to_lowercase() });
 
     if let Some(category) = &item.category {
         q["filters"]["type_filters"]["filters"]["category"] = json!({ "option": category });
@@ -668,7 +672,7 @@ mod tests {
         assert!(local_weapon("Adds 33 to 55 Cold Damage"));
         assert!(local_weapon("32% increased Physical Damage"));
         assert!(local_weapon("16% increased Attack Speed"));
-        assert!(local_weapon("+2.5% to Critical Hit Chance"));
+        assert!(!local_weapon("+2.5% to Critical Hit Chance"));
         assert!(!local_weapon("Adds 14 to 23 Cold damage to Attacks"));
         assert!(!local_weapon("86% increased Elemental Damage with Attacks"));
 

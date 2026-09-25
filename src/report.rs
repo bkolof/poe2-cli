@@ -521,10 +521,24 @@ pub fn trade_stats(stats: &[TradeStat], limit: usize) {
     }
 }
 
-pub fn price_checks(checks: &[PriceCheck], league: &str, rates: &Rates) {
-    match checks {
-        [check] => price_check(check, league, rates),
+pub fn price_checks(
+    checks: &[PriceCheck],
+    failed: &[serde_json::Value],
+    league: &str,
+    rates: &Rates,
+) {
+    match (checks, failed) {
+        ([check], []) => price_check(check, league, rates),
         _ => price_summary(checks, league, rates),
+    }
+
+    for item in failed {
+        println!(
+            "{} ({}) could not be priced: {}",
+            item["slot"].as_str().unwrap_or_default(),
+            item["name"].as_str().unwrap_or_default(),
+            item["reason"].as_str().unwrap_or_default()
+        );
     }
 }
 

@@ -409,7 +409,7 @@ impl Additions {
         let weighted = !weights.is_empty();
         let mut query: Value =
             serde_json::from_str(base_query).context("PoB generated an invalid query")?;
-        let groups = self.groups(&weights, &resolve)?;
+        let groups = self.groups(&resolve)?;
         let stats = query["query"]["stats"]
             .as_array_mut()
             .context("PoB's query has no stat groups")?;
@@ -483,11 +483,7 @@ impl Additions {
         })
     }
 
-    fn groups(
-        &self,
-        weights: &[TradeWeight],
-        resolve: &impl Fn(&str) -> Result<TradeStat>,
-    ) -> Result<Vec<Group>> {
+    fn groups(&self, resolve: &impl Fn(&str) -> Result<TradeStat>) -> Result<Vec<Group>> {
         let stat = |text: &str, range: Range, weight: Option<f64>| -> Result<GroupStat> {
             let found = resolve(text)?;
             Ok(GroupStat {
@@ -554,11 +550,11 @@ impl Additions {
         }
 
         // The site sorts only by stats the query has; an `if` group adds one
-        // without filtering on it.
+        // without filtering on it. PoB's weights do not count, as a search the
+        // site finds too complex is retried with fewer of them.
         if let Some(Sort::Stat(text)) = &self.sort {
             let id = resolve(text)?.id;
-            let present = weights.iter().any(|w| w.id == id)
-                || groups.iter().flat_map(|g| &g.stats).any(|s| s.id == id);
+            let present = groups.iter().flat_map(|g| &g.stats).any(|s| s.id == id);
 
             if !present {
                 groups.push(Group {
@@ -808,14 +804,20 @@ mod tests {
     }
 
     #[test]
-    fn sorting_by_a_stat_adds_it_when_the_query_lacks_it() {
+    fn sorting_by_a_stat_keeps_it_in_the_query() {
         let by = |text: &str| Additions {
             sort: Some(Sort::Stat(text.into())),
             ..Default::default()
         };
 
-        let search = by("life").apply(POB_QUERY, weights(), resolve).unwrap();
-        assert_eq!(search.query["query"]["stats"].as_array().unwrap().len(), 1);
+        // Life is one of PoB's weights, which a retry may drop.
+        let mut search = by("life").apply(POB_QUERY, weights(), resolve).unwrap();
+        search.keep_weights(0);
+        assert_eq!(search.query["query"]["stats"][1]["type"], "if");
+        assert_eq!(
+            search.query["query"]["stats"][1]["filters"][0]["id"],
+            "pseudo.life"
+        );
         assert_eq!(search.query["sort"], json!({ "stat.pseudo.life": "desc" }));
 
         let search = by("spirit").apply(POB_QUERY, weights(), resolve).unwrap();

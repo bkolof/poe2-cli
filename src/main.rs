@@ -554,8 +554,12 @@ fn main() -> Result<()> {
             let client = trade::Client::new()?;
             let mut checks = Vec::new();
 
+            let whole_build = items.len() > 1;
+            let mut failed = Vec::new();
+
             for item in items {
-                let mut check = price::check(
+                let (slot, name) = (item.slot.clone(), item.name.clone());
+                let result = price::check(
                     &client,
                     &league,
                     &rates,
@@ -563,7 +567,15 @@ fn main() -> Result<()> {
                     status_id(status),
                     tolerance / 100.0,
                     fetch,
-                )?;
+                );
+                // One item the site refuses to search does not stop pricing the rest.
+                let mut check = match result {
+                    Err(error) if whole_build && error.is::<trade::TooComplex>() => {
+                        failed.push(serde_json::json!({ "slot": slot, "name": name, "reason": error.to_string() }));
+                        continue;
+                    }
+                    result => result?,
+                };
 
                 if check.item.unique {
                     check.ninja =
@@ -580,10 +592,12 @@ fn main() -> Result<()> {
             }
 
             if json {
-                return print_json(&serde_json::json!({ "league": league, "items": checks }));
+                return print_json(
+                    &serde_json::json!({ "league": league, "items": checks, "failed": failed }),
+                );
             }
 
-            report::price_checks(&checks, &league, &rates);
+            report::price_checks(&checks, &failed, &league, &rates);
         }
         Command::Prices { league, limit } => {
             let league = league.map_or_else(market::current_league, Ok)?;
