@@ -1178,9 +1178,19 @@ local function describeForPrice(item, slotName)
 	local note
 	local weapon
 
+	-- The trade site compares weapon damage and defences at 20% quality, as a
+	-- buyer can raise it.
+	local full = item
+
+	if (item.quality or 0) < 20 then
+		full = new("Item", item:BuildRaw())
+		full.quality = 20
+		full:BuildModList()
+	end
+
 	-- Attack weapons are compared by their damage, which PoB calculates.
-	if item.weaponData and item.weaponData[1] and not unique then
-		local stats = item.weaponData[1]
+	if full.weaponData and full.weaponData[1] and not unique then
+		local stats = full.weaponData[1]
 		weapon = {
 			physicalDps = stats.PhysicalDPS or 0,
 			elementalDps = stats.ElementalDPS or 0,
@@ -1243,7 +1253,7 @@ local function describeForPrice(item, slotName)
 		end
 
 		for key, id in pairs({ Armour = "ar", Evasion = "ev", EnergyShield = "es" }) do
-			local value = not fistsOfStone and item.armourData and item.armourData[key]
+			local value = not fistsOfStone and full.armourData and full.armourData[key]
 
 			if value and value > 0 then
 				defences[id] = value
